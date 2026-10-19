@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 NAME=Dimmer
 BUNDLE_ID=com.jayden.dimmer
-VERSION=1.1.0
+VERSION=1.1.1
 BUILD=$(date +%Y%m%d%H%M)
 MIN_OS=14.0
 IDENTITY="Dimmer Dev"
