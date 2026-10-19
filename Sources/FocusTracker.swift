@@ -201,6 +201,8 @@ final class FocusTracker {
 
         let (wins, rawNormal) = onScreenWindows()
         let normal = wins.filter { $0.layer == 0 }
+        let screens = Dictionary(NSScreen.screens.compactMap { s in s.displayID.map { ($0, s) } }, uniquingKeysWith: { a, _ in a })
+        let display = { (w: Win) in self.displayID(containing: w.bounds, screens) }
         let appNormal = normal.filter { $0.pid == pid }
         let focused = focusedID.flatMap { id in appNormal.first { $0.id == id } }
         let desktopFocused = focused == nil && (focusedID.map(isDesktop) ?? false)
@@ -213,7 +215,11 @@ final class FocusTracker {
             if !desktopFocused && settling && now - lastActivation < Self.settleWindow { return scheduleSettle() }
         } else if !desktopFocused {
             let top = focused ?? appNormal[0]
-            if normal.first?.id == top.id {
+            // "Raised" means front-most on its own screen. The global z-order across screens is not
+            // what the user sees: switching Spaces on one screen puts that screen's windows in front
+            // of a full-screen window on another screen, which is still the focused one.
+            let topDisplay = display(top)
+            if normal.first(where: { display($0) == topDisplay })?.id == top.id {
                 focus = top
             } else if settling {
                 // Not raised yet: keep the current picture, the window will pop above the overlay by itself.
@@ -226,8 +232,7 @@ final class FocusTracker {
             }
         }
 
-        let screens = Dictionary(NSScreen.screens.compactMap { s in s.displayID.map { ($0, s) } }, uniquingKeysWith: { a, _ in a })
-        let focusDisplay = focus.map { displayID(containing: $0.bounds, screens) } ?? mouseDisplay(screens)
+        let focusDisplay = focus.map(display) ?? mouseDisplay(screens)
         var alphas: [(OverlayWindow, CGFloat)] = []
 
         // Every screen keeps one bright window: the focused one on the focused screen, the front-most
@@ -236,7 +241,7 @@ final class FocusTracker {
         for w in overlays.active {
             guard let screen = screens[w.displayID] else { continue }
             let anchor = w.displayID == focusDisplay ? focus
-                : normal.first { displayID(containing: $0.bounds, screens) == w.displayID }
+                : normal.first { display($0) == w.displayID }
             guard let anchor, !covers(anchor.bounds, screen) else {
                 alphas.append((w, 0))
                 continue
