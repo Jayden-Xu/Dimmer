@@ -26,10 +26,15 @@ final class OverlayWindow: NSWindow {
         isExcludedFromWindowsMenu = true
         tabbingMode = .disallowed
         alphaValue = 0
+        // Device RGB: black needs no colour matching. With the default (the screen's profile) AppKit
+        // builds ColorSync transforms per display (~1 MB each) and again after display changes.
+        colorSpace = .deviceRGB
         // Window alpha stays 0/1 (visibility); the dim level lives in the background colour.
-        backgroundColor = NSColor.black.withAlphaComponent(dim)
+        backgroundColor = Self.color(dim)
         setFrame(frame, display: false)
     }
+
+    static func color(_ dim: Double) -> NSColor { NSColor(deviceRed: 0, green: 0, blue: 0, alpha: dim) }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -103,18 +108,13 @@ final class Overlays {
     func setDim(_ dim: Double) {
         guard dim != self.dim else { return }
         self.dim = dim
-        let color = NSColor.black.withAlphaComponent(dim)
+        let color = OverlayWindow.color(dim)
         for w in all { w.backgroundColor = color }
     }
 
     /// Instantly set each window's alpha (0 = hidden, 1 = shown). Never orderOut: re-ordering in can flash.
     func setAlpha(_ changes: [(OverlayWindow, CGFloat)]) {
         for (w, a) in changes where w.alphaValue != a { w.alphaValue = a }
-    }
-
-    /// Hide the overlays on screen now (other Spaces keep their state for when we return).
-    func hideActive() {
-        setAlpha(active.map { ($0, 0) })
     }
 
     /// Hide every overlay, including other Spaces' (effect turned off).

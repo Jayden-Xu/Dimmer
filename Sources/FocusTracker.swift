@@ -5,12 +5,13 @@ import os
 let log = Logger(subsystem: "com.jayden.dimmer", category: "focus")
 
 /// Listens for focus / window / Space / screen events (no timers, no polling) and keeps each
-/// on-screen overlay ordered directly below the focused window.
+/// on-screen overlay ordered directly below its screen's bright window: the focused window on the
+/// focused screen, the front-most window on every other screen.
 ///
 /// Timing detail that drives the design: when an app is activated, NSWorkspace / AX notify us
 /// 50–250 ms *before* the app raises its windows. Ordering the overlay below a window that is
 /// still buried would un-dim everything above it, and the overlay would stay buried once the
-/// window rises. So after an event we keep the current picture and re-check every 8 ms (for at
+/// window rises. So after an event we keep the current picture and re-check every 2 ms (for at
 /// most 0.7 s) until the focused window really is on top, then re-order in one step.
 @MainActor
 final class FocusTracker {
@@ -123,7 +124,7 @@ final class FocusTracker {
         }
     }
 
-    /// Re-check every 8 ms while the focused window has not been raised yet (bounded by settleUntil).
+    /// Re-check every 2 ms while the focused window has not been raised yet (bounded by settleUntil).
     private func scheduleSettle() {
         guard !settleScheduled else { return }
         settleScheduled = true
@@ -201,56 +202,52 @@ final class FocusTracker {
         let (wins, rawNormal) = onScreenWindows()
         let normal = wins.filter { $0.layer == 0 }
         let appNormal = normal.filter { $0.pid == pid }
-
-        guard !appNormal.isEmpty else {
-            if wins.contains(where: { $0.pid == pid }) { return } // only floating panels: leave as is
-            if let f = focusedID, isDesktop(f) { return hide("desktop focused") }
-            // Just activated / launched: its first window may be a moment away. Wait, don't flash.
-            if settling && now - lastActivation < Self.settleWindow { return scheduleSettle() }
-            return hide("no windows")
-        }
-
         let focused = focusedID.flatMap { id in appNormal.first { $0.id == id } }
-        if focused == nil, let f = focusedID, isDesktop(f) { return hide("desktop focused") }
-        var top = focused ?? appNormal[0]
+        let desktopFocused = focused == nil && (focusedID.map(isDesktop) ?? false)
 
-        if normal.first?.id != top.id {
-            // Not raised yet: keep the current picture, the window will pop above the overlay by itself.
-            if settling {
+        // The window to keep bright on the focused screen; nil = nothing (desktop, no windows).
+        var focus: Win?
+        if appNormal.isEmpty {
+            if wins.contains(where: { $0.pid == pid }) { return } // only floating panels: leave as is
+            // Just activated / launched: its first window may be a moment away. Wait, don't flash.
+            if !desktopFocused && settling && now - lastActivation < Self.settleWindow { return scheduleSettle() }
+        } else if !desktopFocused {
+            let top = focused ?? appNormal[0]
+            if normal.first?.id == top.id {
+                focus = top
+            } else if settling {
+                // Not raised yet: keep the current picture, the window will pop above the overlay by itself.
                 if !settleScheduled { log.debug("pending: top \(normal.first?.id ?? 0), want \(top.id)") }
                 return scheduleSettle()
+            } else if normal.first?.pid == pid {
+                // Settle time is over: the app's own window is on top, use that. Otherwise the app was
+                // activated without raising anything (e.g. a click on the desktop).
+                focus = appNormal[0]
             }
-            // Settle time is over. If the app's own window is on top, use that; otherwise the app was
-            // activated without raising anything (e.g. a click on the desktop).
-            guard normal.first?.pid == pid else { return hide("front app has no raised window") }
-            top = appNormal[0]
         }
 
-        let target = top
         let screens = Dictionary(NSScreen.screens.compactMap { s in s.displayID.map { ($0, s) } }, uniquingKeysWith: { a, _ in a })
-        let topDisplay = displayID(containing: top.bounds, screens)
+        let focusDisplay = focus.map { displayID(containing: $0.bounds, screens) } ?? mouseDisplay(screens)
         var alphas: [(OverlayWindow, CGFloat)] = []
 
+        // Every screen keeps one bright window: the focused one on the focused screen, the front-most
+        // one on each other screen. Skip a screen whose bright window covers it (full screen, Split
+        // View, borderless game): nothing shows behind it.
         for w in overlays.active {
             guard let screen = screens[w.displayID] else { continue }
-            // Only the screen with the focused window is dimmed. Skip it too when the focused window
-            // covers the whole screen (full screen, Split View, borderless game): nothing shows behind it.
-            if w.displayID != topDisplay || covers(top.bounds, screen) {
+            let anchor = w.displayID == focusDisplay ? focus
+                : normal.first { displayID(containing: $0.bounds, screens) == w.displayID }
+            guard let anchor, !covers(anchor.bounds, screen) else {
                 alphas.append((w, 0))
                 continue
             }
-            if !isDirectlyBelow(w.windowNumber, target.id, rawNormal) {
-                w.order(.below, relativeTo: Int(target.id))
+            if !isDirectlyBelow(w.windowNumber, anchor.id, rawNormal) {
+                w.order(.below, relativeTo: Int(anchor.id))
             }
             alphas.append((w, 1))
         }
         overlays.setAlpha(alphas)
-        log.debug("order below \(target.id) (\(app.localizedName ?? "?", privacy: .public)), focused \(self.focusedID ?? 0)")
-    }
-
-    private func hide(_ why: StaticString) {
-        log.debug("hide: \(why)")
-        overlays.hideActive()
+        log.debug("focus \(focus?.id ?? 0) on display \(focusDisplay ?? 0) (\(app.localizedName ?? "?", privacy: .public))")
     }
 
     private func displayID(containing rect: CGRect, _ screens: [CGDirectDisplayID: NSScreen]) -> CGDirectDisplayID? {
@@ -261,6 +258,12 @@ final class FocusTracker {
             if area > (best?.1 ?? 0) { best = (id, area) }
         }
         return best?.0
+    }
+
+    /// The screen under the mouse: where the user just clicked when no window has focus.
+    private func mouseDisplay(_ screens: [CGDirectDisplayID: NSScreen]) -> CGDirectDisplayID? {
+        let p = NSEvent.mouseLocation
+        return screens.first { NSMouseInRect(p, $0.value.frame, false) }?.key
     }
 
     /// Window fills the screen, allowing for the menu bar strip (full-screen windows on notched

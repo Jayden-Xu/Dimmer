@@ -5,20 +5,31 @@ cd "$(dirname "$0")"
 
 NAME=Dimmer
 BUNDLE_ID=com.jayden.dimmer
-VERSION=1.0.0
+VERSION=1.1.0
 BUILD=$(date +%Y%m%d%H%M)
 MIN_OS=14.0
 IDENTITY="Dimmer Dev"
 APP="build/$NAME.app"
 
 echo "==> Compiling"
-rm -rf build
+rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -swift-version 5 \
   -target "$(uname -m)-apple-macos$MIN_OS" \
   -sdk "$(xcrun --show-sdk-path)" \
   -framework AppKit -framework Carbon -framework ServiceManagement -framework ApplicationServices \
   Sources/*.swift -o "$APP/Contents/MacOS/$NAME"
+
+# The icon is drawn by icon.swift; regenerate only when that file changes.
+ICON=build/AppIcon.icns
+if [ ! -f "$ICON" ] || [ icon.swift -nt "$ICON" ]; then
+  echo "==> Drawing icon"
+  rm -rf build/AppIcon.iconset
+  swift icon.swift build/AppIcon.iconset
+  iconutil -c icns build/AppIcon.iconset -o "$ICON"
+  rm -rf build/AppIcon.iconset
+fi
+cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 
 echo "==> Writing Info.plist"
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -30,6 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleName</key><string>$NAME</string>
   <key>CFBundleDisplayName</key><string>$NAME</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD</string>

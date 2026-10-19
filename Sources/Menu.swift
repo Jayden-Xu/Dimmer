@@ -60,7 +60,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         statusItem.button?.image = Self.icon() // set once, never changed
     }
 
-    /// Static template bitmap, rendered once: a shaded screen with one clear window in the middle.
+    /// Static template bitmap, rendered once. Same picture as the app icon: two dimmed windows
+    /// behind one bright window.
     private static func icon() -> NSImage {
         let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 36, pixelsHigh: 32, bitsPerSample: 8,
                                    samplesPerPixel: 2, hasAlpha: true, isPlanar: false,
@@ -68,11 +69,18 @@ final class MenuController: NSObject, NSMenuDelegate {
         rep.size = NSSize(width: 18, height: 16)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ r: CGFloat) -> NSBezierPath {
+            NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h), xRadius: r, yRadius: r)
+        }
+        NSColor(deviceWhite: 0, alpha: 0.4).set()
+        rect(0.5, 7, 10.5, 8.5, 1.5).fill()
+        rect(7, 0.5, 10.5, 8.5, 1.5).fill()
+        // Clear a 1 pt gap around the front window so it reads as separate.
+        NSGraphicsContext.current?.compositingOperation = .clear
+        rect(3, 3, 12, 10, 2.5).fill()
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
         NSColor(deviceWhite: 0, alpha: 1).set()
-        let shape = NSBezierPath(roundedRect: NSRect(x: 1, y: 2, width: 16, height: 12), xRadius: 3, yRadius: 3)
-        shape.append(NSBezierPath(roundedRect: NSRect(x: 5, y: 5, width: 8, height: 6), xRadius: 1.5, yRadius: 1.5))
-        shape.windingRule = .evenOdd
-        shape.fill()
+        rect(4, 4, 10, 8, 1.5).fill()
         NSGraphicsContext.restoreGraphicsState()
         let img = NSImage(size: rep.size)
         img.addRepresentation(rep)

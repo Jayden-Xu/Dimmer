@@ -10,16 +10,6 @@ final class HotKey {
         let key: String            // lowercase key name, e.g. "d"
         let cocoaModifiers: NSEvent.ModifierFlags
 
-        /// "⌃⌥⌘D"
-        var display: String {
-            var s = ""
-            if cocoaModifiers.contains(.control) { s += "⌃" }
-            if cocoaModifiers.contains(.option) { s += "⌥" }
-            if cocoaModifiers.contains(.shift) { s += "⇧" }
-            if cocoaModifiers.contains(.command) { s += "⌘" }
-            return s + (key.count == 1 ? key.uppercased() : key.capitalized)
-        }
-
         /// Parses "ctrl+opt+cmd+d" (also: control, alt, option, command, shift).
         init?(_ string: String) {
             var carbon: UInt32 = 0
