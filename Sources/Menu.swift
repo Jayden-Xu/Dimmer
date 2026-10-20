@@ -107,7 +107,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         guard let host else { return }
         menu.removeAllItems()
 
-        let toggle = item("开启", #selector(toggleEnabled))
+        let toggle = item("Enabled", #selector(toggleEnabled))
         toggle.state = settings.enabled ? .on : .off
         if let c = host.hotKeyDisplay, c.key.count == 1 {
             toggle.keyEquivalent = c.key
@@ -115,20 +115,20 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
         menu.addItem(toggle)
 
-        let slider = SliderItemView(title: "压暗程度", value: settings.dim, min: 0.05, max: 0.85) { "\(Int(($0 * 100).rounded()))%" }
+        let slider = SliderItemView(title: "Dim Level", value: settings.dim, min: 0.05, max: 0.85) { "\(Int(($0 * 100).rounded()))%" }
         slider.onChange = { [weak self] v in self?.host?.setDim(v) }
         let sliderItem = NSMenuItem()
         sliderItem.view = slider
         menu.addItem(sliderItem)
 
         menu.addItem(.separator())
-        let login = item("开机启动", #selector(toggleLogin))
+        let login = item("Launch at Login", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
         if !host.axTrusted {
-            menu.addItem(item("去授权辅助功能…", #selector(openAXSettings)))
+            menu.addItem(item("Grant Accessibility Access…", #selector(openAXSettings)))
         }
-        menu.addItem(item("退出", #selector(quit), key: "q"))
+        menu.addItem(item("Quit", #selector(quit), key: "q"))
     }
 
     private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
