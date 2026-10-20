@@ -46,7 +46,9 @@ protocol MenuHost: AnyObject {
 @MainActor
 final class MenuController: NSObject, NSMenuDelegate {
     private let settings = Settings.shared
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    // Sized by the 16 pt icon plus the system's 16 pt padding: 32 pt like most menu bar items.
+    // squareLength follows the bar height instead (38 pt on notched screens).
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private weak var host: MenuHost?
 
@@ -63,24 +65,24 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// Static template bitmap, rendered once. Same picture as the app icon: two dimmed windows
     /// behind one bright window.
     private static func icon() -> NSImage {
-        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 36, pixelsHigh: 32, bitsPerSample: 8,
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32, bitsPerSample: 8,
                                    samplesPerPixel: 2, hasAlpha: true, isPlanar: false,
                                    colorSpaceName: .deviceWhite, bytesPerRow: 0, bitsPerPixel: 0)!
-        rep.size = NSSize(width: 18, height: 16)
+        rep.size = NSSize(width: 16, height: 16)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ r: CGFloat) -> NSBezierPath {
             NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h), xRadius: r, yRadius: r)
         }
         NSColor(deviceWhite: 0, alpha: 0.4).set()
-        rect(0.5, 7, 10.5, 8.5, 1.5).fill()
-        rect(7, 0.5, 10.5, 8.5, 1.5).fill()
+        rect(0.5, 7, 9.5, 8.5, 1.5).fill()
+        rect(6, 0.5, 9.5, 8.5, 1.5).fill()
         // Clear a 1 pt gap around the front window so it reads as separate.
         NSGraphicsContext.current?.compositingOperation = .clear
-        rect(3, 3, 12, 10, 2.5).fill()
+        rect(2.5, 3, 11, 10, 2.5).fill()
         NSGraphicsContext.current?.compositingOperation = .sourceOver
         NSColor(deviceWhite: 0, alpha: 1).set()
-        rect(4, 4, 10, 8, 1.5).fill()
+        rect(3.5, 4, 9, 8, 1.5).fill()
         NSGraphicsContext.restoreGraphicsState()
         let img = NSImage(size: rep.size)
         img.addRepresentation(rep)
