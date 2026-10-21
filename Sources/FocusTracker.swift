@@ -11,8 +11,8 @@ let log = Logger(subsystem: "com.jayden.dimmer", category: "focus")
 /// Timing detail that drives the design: when an app is activated, NSWorkspace / AX notify us
 /// 50–250 ms *before* the app raises its windows. Ordering the overlay below a window that is
 /// still buried would un-dim everything above it, and the overlay would stay buried once the
-/// window rises. So after an event we keep the current picture and re-check every 2 ms (for at
-/// most 0.7 s) until the focused window really is on top, then re-order in one step.
+/// window rises. So after an event we keep the current picture and re-check once per display
+/// frame (for at most 0.7 s) until the focused window really is on top, then re-order in one step.
 @MainActor
 final class FocusTracker {
     private let settings = Settings.shared
@@ -35,7 +35,13 @@ final class FocusTracker {
     private var focusedID: CGWindowID?
 
     private static let settleWindow: CFTimeInterval = 0.7
-    private static let settleStep: TimeInterval = 0.002
+    /// One frame of the fastest screen: checking more often can't put anything on screen sooner.
+    /// Each check copies the window list (~0.7 ms), and a Space switch keeps us waiting ~0.3 s.
+    private var settleStep = FocusTracker.frameInterval()
+
+    private static func frameInterval() -> TimeInterval {
+        1 / Double(max(60, NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60))
+    }
 
     init(overlays: Overlays) {
         self.overlays = overlays
@@ -92,6 +98,7 @@ final class FocusTracker {
 
     private func spacesChanged() {
         log.debug("event: spaces/screens changed")
+        settleStep = Self.frameInterval()
         overlays.sync()
         setNeedsUpdate(recheck: true)
     }
@@ -124,11 +131,11 @@ final class FocusTracker {
         }
     }
 
-    /// Re-check every 2 ms while the focused window has not been raised yet (bounded by settleUntil).
+    /// Re-check once per frame while the focused window has not been raised yet (bounded by settleUntil).
     private func scheduleSettle() {
         guard !settleScheduled else { return }
         settleScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleStep) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleStep) { [weak self] in
             MainActor.assumeIsolated {
                 self?.settleScheduled = false
                 self?.setNeedsUpdate(event: false)
@@ -215,11 +222,13 @@ final class FocusTracker {
             if !desktopFocused && settling && now - lastActivation < Self.settleWindow { return scheduleSettle() }
         } else if !desktopFocused {
             let top = focused ?? appNormal[0]
-            // "Raised" means front-most on its own screen. The global z-order across screens is not
-            // what the user sees: switching Spaces on one screen puts that screen's windows in front
-            // of a full-screen window on another screen, which is still the focused one.
+            // "Raised" means no other app's window above it on its own screen. Windows of the same app
+            // may be (a full-screen Safari's toolbar is a separate window over its page). The global
+            // z-order across screens is not what the user sees: switching Spaces on one screen puts that
+            // screen's windows in front of a full-screen window on another screen, which is still the focused one.
             let topDisplay = display(top)
-            if normal.first(where: { display($0) == topDisplay })?.id == top.id {
+            let above = normal.lazy.filter { display($0) == topDisplay }.prefix { $0.id != top.id }
+            if above.allSatisfy({ $0.pid == pid }) {
                 focus = top
             } else if settling {
                 // Not raised yet: keep the current picture, the window will pop above the overlay by itself.
