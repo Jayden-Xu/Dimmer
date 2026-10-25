@@ -1,7 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// Global hotkey via Carbon RegisterEventHotKey (needs no extra permission).
+/// Global hotkeys via Carbon RegisterEventHotKey (needs no extra permission).
 @MainActor
 final class HotKey {
     struct Combo {
@@ -32,30 +32,39 @@ final class HotKey {
         }
     }
 
-    private var ref: EventHotKeyRef?
+    private var refs: [EventHotKeyRef] = []
+    private var actions: [UInt32: () -> Void] = [:]
     private var handler: EventHandlerRef?
-    private let action: () -> Void
-    private(set) var combo: Combo?
 
-    init(action: @escaping () -> Void) {
-        self.action = action
+    init() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, refcon in
-            guard let refcon else { return noErr }
-            let hk = Unmanaged<HotKey>.fromOpaque(refcon).takeUnretainedValue()
-            MainActor.assumeIsolated { hk.action() }
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, refcon in
+            guard let event, let refcon else { return noErr }
+            var hk = EventHotKeyID()
+            guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                    nil, MemoryLayout<EventHotKeyID>.size, nil, &hk) == noErr else { return noErr }
+            let me = Unmanaged<HotKey>.fromOpaque(refcon).takeUnretainedValue()
+            MainActor.assumeIsolated { me.actions[hk.id]?() }
             return noErr
         }, 1, &spec, refcon, &handler)
     }
 
-    func register(_ string: String) {
-        if let ref { UnregisterEventHotKey(ref); self.ref = nil }
-        guard let c = Combo(string) ?? Combo("ctrl+opt+cmd+d") else { return }
-        combo = c
-        let id = EventHotKeyID(signature: OSType(0x444D4D52), id: 1) // 'DMMR'
-        let status = RegisterEventHotKey(c.keyCode, c.carbonModifiers, id, GetApplicationEventTarget(), 0, &ref)
-        if status != noErr { NSLog("Dimmer: RegisterEventHotKey failed (\(status)) for \(string)") }
+    /// Registers `string` (or `fallback` if it does not parse). Returns the combo for display.
+    @discardableResult
+    func register(_ string: String, fallback: String, action: @escaping () -> Void) -> Combo? {
+        guard let c = Combo(string) ?? Combo(fallback) else { return nil }
+        let id = UInt32(actions.count + 1)
+        actions[id] = action
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(c.keyCode, c.carbonModifiers, EventHotKeyID(signature: OSType(0x444D4D52), id: id), // 'DMMR'
+                                         GetApplicationEventTarget(), 0, &ref)
+        guard status == noErr, let ref else {
+            NSLog("dimmer: RegisterEventHotKey failed (\(status)) for \(string)")
+            return nil
+        }
+        refs.append(ref)
+        return c
     }
 
     /// Virtual key codes (ANSI positions).

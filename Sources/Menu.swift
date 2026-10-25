@@ -9,19 +9,25 @@ final class SliderItemView: NSView {
     private let format: (Double) -> String
     var onChange: ((Double) -> Void)?
 
-    init(title: String, value: Double, min: Double, max: Double, format: @escaping (Double) -> String) {
+    /// `inset`: where the menu's titles start (see MenuController.rebuild).
+    init(title: String, value: Double, min: Double, max: Double, inset: CGFloat, format: @escaping (Double) -> String) {
         self.title = title
         self.format = format
         slider = NSSlider(value: value, minValue: min, maxValue: max, target: nil, action: nil)
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 46))
         label.font = .menuFont(ofSize: 0)
-        label.frame = NSRect(x: 20, y: 24, width: 206, height: 17)
+        // Line up with the menu's titles (the field draws 2 pt in); end where separators end.
+        label.frame = NSRect(x: inset - 2, y: 24, width: 228 - inset, height: 17)
         label.stringValue = "\(title)  \(format(value))"
-        slider.frame = NSRect(x: 18, y: 4, width: 206, height: 20)
+        slider.frame = NSRect(x: inset - 2, y: 4, width: 228 - inset, height: 20)
         slider.isContinuous = true
         slider.controlSize = .small
         slider.target = self
         slider.action = #selector(changed)
+        // The menu widens to its widest item; stretch with it so the right edge meets the separators.
+        autoresizingMask = .width
+        label.autoresizingMask = .width
+        slider.autoresizingMask = .width
         addSubview(label)
         addSubview(slider)
     }
@@ -34,13 +40,86 @@ final class SliderItemView: NSView {
     }
 }
 
+/// Menu header while a focus or rest runs, terminal style:
+///
+///     FOCUS
+///     38:12
+///     ▮▮▮▮▮▮▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯
+///
+/// Ticks once a second only while the menu is open (the view exists only then).
+final class TimerItemView: NSView {
+    private static let segments = 25
+
+    private let inset: CGFloat
+    private let caption: String
+    private let start: Date
+    private let end: Date
+    private var timer: Timer?
+
+    init(caption: String, start: Date, end: Date, inset: CGFloat) {
+        self.inset = inset
+        self.caption = caption
+        self.start = start
+        self.end = end
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 86))
+        autoresizingMask = .width
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        timer?.invalidate()
+        timer = nil
+        guard window != nil else { return }
+        // Fire on the countdown's whole seconds; .common so it runs while the menu tracks.
+        let first = Date() + end.timeIntervalSinceNow.truncatingRemainder(dividingBy: 1) + 0.01
+        let t = Timer(fire: first, interval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.needsDisplay = true }
+        }
+        t.tolerance = 0.05
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private static func mono(_ size: CGFloat, _ weight: NSFont.Weight, _ color: NSColor, kern: CGFloat = 0) -> [NSAttributedString.Key: Any] {
+        [.font: NSFont.monospacedSystemFont(ofSize: size, weight: weight), .foregroundColor: color, .kern: kern]
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let left = max(0, end.timeIntervalSinceNow)
+        let total = end.timeIntervalSince(start)
+        let secs = Int(left.rounded(.up))
+        let x = inset, w = bounds.width - x - 16
+        // Dark grey on a light menu, light grey on a dark one.
+        let ink = NSColor.labelColor.withAlphaComponent(0.7)
+
+        NSAttributedString(string: caption, attributes: Self.mono(10, .semibold, .secondaryLabelColor, kern: 1.5))
+            .draw(at: NSPoint(x: x, y: 62))
+
+        // 38:12
+        NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60),
+                           attributes: Self.mono(30, .medium, ink, kern: 1))
+            .draw(at: NSPoint(x: x - 1, y: 20))
+
+        // Segmented progress.
+        let n = Self.segments, gap: CGFloat = 2
+        let seg = (w - gap * CGFloat(n - 1)) / CGFloat(n)
+        let done = total > 0 ? Int((Double(n) * (1 - left / total)).rounded(.down)) : n
+        for i in 0..<n {
+            (i < done ? ink : NSColor.quaternaryLabelColor).setFill()
+            NSRect(x: x + CGFloat(i) * (seg + gap), y: 10, width: seg, height: 6).fill()
+        }
+    }
+}
+
 /// Everything the menu needs from the app.
 @MainActor
 protocol MenuHost: AnyObject {
     var axTrusted: Bool { get }
-    var hotKeyDisplay: HotKey.Combo? { get }
-    func toggleEnabled()
-    func setDim(_ dim: Double)
+    var session: Session { get }
+    var focusHotKey: HotKey.Combo? { get }
+    func setDimLevel(_ level: Double)
+    func next()
 }
 
 @MainActor
@@ -51,20 +130,33 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private weak var host: MenuHost?
+    private var focusing: Bool?
 
     init(host: MenuHost) {
         self.host = host
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
-        menu.addItem(NSMenuItem(title: "Dimmer", action: nil, keyEquivalent: "")) // placeholder until first open
+        menu.addItem(placeholder())
         statusItem.menu = menu
-        statusItem.button?.image = Self.icon() // set once, never changed
     }
 
-    /// Static template bitmap, rendered once. Same picture as the app icon: two dimmed windows
-    /// behind one bright window.
-    private static func icon() -> NSImage {
+    /// Pop the menu open, as if the menu bar icon was clicked.
+    func open() { statusItem.button?.performClick(nil) }
+
+    /// Close the menu (its countdown belongs to the phase that just ended).
+    func close() { menu.cancelTracking() }
+
+    /// Redrawn only when that flips.
+    func setIcon(focusing: Bool) {
+        guard focusing != self.focusing else { return }
+        self.focusing = focusing
+        statusItem.button?.image = Self.icon(focusing: focusing)
+    }
+
+    /// Template bitmap, same picture as the app icon: two dimmed windows behind one bright window.
+    /// Three dimmed windows; while focusing the front one lights up (full strength: white on a dark bar).
+    private static func icon(focusing: Bool) -> NSImage {
         let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32, bitsPerSample: 8,
                                    samplesPerPixel: 2, hasAlpha: true, isPlanar: false,
                                    colorSpaceName: .deviceWhite, bytesPerRow: 0, bitsPerPixel: 0)!
@@ -81,13 +173,13 @@ final class MenuController: NSObject, NSMenuDelegate {
         NSGraphicsContext.current?.compositingOperation = .clear
         rect(2.5, 3, 11, 10, 2.5).fill()
         NSGraphicsContext.current?.compositingOperation = .sourceOver
-        NSColor(deviceWhite: 0, alpha: 1).set()
+        if focusing { NSColor(deviceWhite: 0, alpha: 1).set() }
         rect(3.5, 4, 9, 8, 1.5).fill()
         NSGraphicsContext.restoreGraphicsState()
         let img = NSImage(size: rep.size)
         img.addRepresentation(rep)
         img.isTemplate = true
-        img.accessibilityDescription = "Dimmer"
+        img.accessibilityDescription = "dimmer"
         return img
     }
 
@@ -98,32 +190,47 @@ final class MenuController: NSObject, NSMenuDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.menu.removeAllItems()
-                self.menu.addItem(NSMenuItem(title: "Dimmer", action: nil, keyEquivalent: ""))
+                self.menu.addItem(self.placeholder())
+                trimMemory()
             }
         }
     }
 
+    private func placeholder() -> NSMenuItem { NSMenuItem(title: "dimmer", action: nil, keyEquivalent: "") }
+
     private func rebuild() {
         guard let host else { return }
         menu.removeAllItems()
+        let session = host.session
+        // Titles start 16 pt in, or 24 pt once any item shows a checkmark (the state column).
+        // Separators always span 16…224. Our own views follow the titles.
+        let loginOn = SMAppService.mainApp.status == .enabled
+        let inset: CGFloat = loginOn ? 24 : 16
 
-        let toggle = item("Enabled", #selector(toggleEnabled))
-        toggle.state = settings.enabled ? .on : .off
-        if let c = host.hotKeyDisplay, c.key.count == 1 {
-            toggle.keyEquivalent = c.key
-            toggle.keyEquivalentModifierMask = c.cocoaModifiers
+        switch session.phase {
+        case .idle:
+            menu.addItem(withHotKey(item("Start Focus · \(BreakScreen.fmt(settings.focusMinutes)) min", #selector(next)), host.focusHotKey))
+        case .focus, .rest:
+            let focus = session.phase == .focus
+            let clock = NSMenuItem()
+            clock.view = TimerItemView(caption: focus ? "FOCUS" : "REST", start: session.start, end: session.end, inset: inset)
+            menu.addItem(clock)
+            menu.addItem(.separator())
+            menu.addItem(withHotKey(item(focus ? "End Focus" : "End Rest", #selector(next)), host.focusHotKey))
+        case .due:
+            break // covered by the break screen
         }
-        menu.addItem(toggle)
 
-        let slider = SliderItemView(title: "Dim Level", value: settings.dim, min: 0.05, max: 0.85) { "\(Int(($0 * 100).rounded()))%" }
-        slider.onChange = { [weak self] v in self?.host?.setDim(v) }
+        menu.addItem(.separator())
+        let slider = SliderItemView(title: "Dim", value: settings.dimLevel, min: 0.05, max: 0.85, inset: inset) { "\(Int(($0 * 100).rounded()))%" }
+        slider.onChange = { [weak self] v in self?.host?.setDimLevel(v) }
         let sliderItem = NSMenuItem()
         sliderItem.view = slider
         menu.addItem(sliderItem)
 
         menu.addItem(.separator())
         let login = item("Launch at Login", #selector(toggleLogin))
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        login.state = loginOn ? .on : .off
         menu.addItem(login)
         if !host.axTrusted {
             menu.addItem(item("Grant Accessibility Access…", #selector(openAXSettings)))
@@ -137,16 +244,24 @@ final class MenuController: NSObject, NSMenuDelegate {
         return it
     }
 
+    private func withHotKey(_ it: NSMenuItem, _ combo: HotKey.Combo?) -> NSMenuItem {
+        if let c = combo, c.key.count == 1 {
+            it.keyEquivalent = c.key
+            it.keyEquivalentModifierMask = c.cocoaModifiers
+        }
+        return it
+    }
+
     // MARK: actions
 
-    @objc private func toggleEnabled() { host?.toggleEnabled() }
+    @objc private func next() { host?.next() }
 
     @objc private func toggleLogin() {
         let svc = SMAppService.mainApp
         do {
             if svc.status == .enabled { try svc.unregister() } else { try svc.register() }
         } catch {
-            NSLog("Dimmer: login item change failed: \(error)")
+            NSLog("dimmer: login item change failed: \(error)")
         }
         if svc.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     }

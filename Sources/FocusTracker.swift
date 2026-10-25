@@ -13,10 +13,12 @@ let log = Logger(subsystem: "com.jayden.dimmer", category: "focus")
 /// still buried would un-dim everything above it, and the overlay would stay buried once the
 /// window rises. So after an event we keep the current picture and re-check once per display
 /// frame (for at most 0.7 s) until the focused window really is on top, then re-order in one step.
+///
+/// While inactive (dim off, no session) it does nothing at all: no AX observer, no window-list reads.
 @MainActor
 final class FocusTracker {
-    private let settings = Settings.shared
     private let overlays: Overlays
+    private(set) var active = false
     private let selfPID = ProcessInfo.processInfo.processIdentifier
 
     private(set) var axTrusted = AXIsProcessTrusted()
@@ -33,6 +35,8 @@ final class FocusTracker {
     private var lastActivation: CFAbsoluteTime = 0
     private var focusDirty = true
     private var focusedID: CGWindowID?
+    private var dragUntil: CFAbsoluteTime = 0
+    private var dragScheduled = false
 
     private static let settleWindow: CFTimeInterval = 0.7
     /// One frame of the fastest screen: checking more often can't put anything on screen sooner.
@@ -78,7 +82,18 @@ final class FocusTracker {
             let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
             axTrusted = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         }
-        appActivated(NSWorkspace.shared.frontmostApplication)
+    }
+
+    func setActive(_ on: Bool) {
+        guard on != active else { return }
+        active = on
+        if on {
+            overlays.sync()
+            appActivated(NSWorkspace.shared.frontmostApplication)
+        } else {
+            dropAXObserver()
+            overlays.hideAll()
+        }
     }
 
     func refreshTrust() {
@@ -97,6 +112,7 @@ final class FocusTracker {
     }
 
     private func spacesChanged() {
+        guard active else { return }
         log.debug("event: spaces/screens changed")
         settleStep = Self.frameInterval()
         overlays.sync()
@@ -110,6 +126,7 @@ final class FocusTracker {
     /// settle re-check); it re-reads the focused window and restarts the settle window.
     func setNeedsUpdate(rebind: Bool = false, recheck: Bool = false,
                         event: Bool = true, refocus: Bool = true) {
+        guard active else { return }
         if event {
             settleUntil = CFAbsoluteTimeGetCurrent() + Self.settleWindow
             if refocus { focusDirty = true }
@@ -129,6 +146,25 @@ final class FocusTracker {
                 self.update()
             }
         }
+    }
+
+    /// Window drags report a move many times a second, yet nothing needs to change until the window
+    /// stops (it may then sit on another screen, or fill one): update once, 0.15 s after the last move.
+    private func scheduleDragEnd() {
+        dragUntil = CFAbsoluteTimeGetCurrent() + 0.15
+        guard !dragScheduled else { return }
+        dragScheduled = true
+        func wait() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, dragUntil - CFAbsoluteTimeGetCurrent())) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if CFAbsoluteTimeGetCurrent() < self.dragUntil { return wait() }
+                    self.dragScheduled = false
+                    self.setNeedsUpdate(refocus: false)
+                }
+            }
+        }
+        wait()
     }
 
     /// Re-check once per frame while the focused window has not been raised yet (bounded by settleUntil).
@@ -195,7 +231,7 @@ final class FocusTracker {
     }
 
     func update() {
-        guard settings.enabled else { return }
+        guard active else { return }
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != selfPID else { return }
         let pid = app.processIdentifier
         let now = CFAbsoluteTimeGetCurrent()
@@ -307,16 +343,20 @@ final class FocusTracker {
         return Private.windowID(of: value as! AXUIElement)
     }
 
+    private func dropAXObserver() {
+        if let old = axObserver {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(old), .commonModes)
+        }
+        axObserver = nil
+        axPID = 0
+    }
+
     private func rebindAXObserver() {
         guard axTrusted else { return }
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != selfPID else { return }
         let pid = app.processIdentifier
         guard pid != axPID else { return }
-        if let old = axObserver {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(old), .commonModes)
-            axObserver = nil
-            axPID = 0
-        }
+        dropAXObserver()
         var obs: AXObserver?
         guard AXObserverCreate(pid, axCallback, &obs) == .success, let obs else { return }
         let element = AXUIElementCreateApplication(pid)
@@ -349,6 +389,7 @@ final class FocusTracker {
     }
 
     fileprivate func axEvent(_ name: String, _ element: AXUIElement) {
+        guard active else { return }
         log.debug("event: AX \(name, privacy: .public)")
         if name == kAXWindowCreatedNotification, let obs = axObserver {
             let refcon = Unmanaged.passUnretained(self).toOpaque()
@@ -356,7 +397,7 @@ final class FocusTracker {
         }
         switch name {
         case kAXWindowMovedNotification, kAXWindowResizedNotification:
-            setNeedsUpdate(refocus: false) // fires continuously while dragging; no AX round trip
+            scheduleDragEnd()
         case kAXWindowCreatedNotification, kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification:
             setNeedsUpdate(recheck: true)
         default:

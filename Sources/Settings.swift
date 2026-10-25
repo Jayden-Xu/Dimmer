@@ -8,21 +8,25 @@ final class Settings {
 
     private init() {
         d.register(defaults: [
-            "enabled": true,
-            "dim": 0.35,
-            "hotKey": "ctrl+opt+cmd+d",
+            "dimLevel": 0.35,
+            "focusMinutes": 50,
+            "restMinutes": 10,
+            "focusHotKey": "ctrl+opt+cmd+f",
+            "menuHotKey": "ctrl+opt+cmd+d",
         ])
     }
 
-    var enabled: Bool {
-        get { d.bool(forKey: "enabled") }
-        set { d.set(newValue, forKey: "enabled") }
-    }
     /// Black overlay alpha, 0...1.
-    var dim: Double {
-        get { d.double(forKey: "dim") }
-        set { d.set(newValue, forKey: "dim") }
+    var dimLevel: Double {
+        get { d.double(forKey: "dimLevel") }
+        set { d.set(newValue, forKey: "dimLevel") }
     }
-    /// e.g. "ctrl+opt+cmd+d". Change with `defaults write com.jayden.dimmer hotKey "…"`, then relaunch.
-    var hotKey: String { d.string(forKey: "hotKey") ?? "ctrl+opt+cmd+d" }
+    /// Fixed at 50 / 10. Only for test runs, as launch arguments (never stored):
+    /// `open dimmer.app --args -focusMinutes 0.1 -restMinutes 0.1`.
+    var focusMinutes: Double { max(0.05, d.double(forKey: "focusMinutes")) }
+    var restMinutes: Double { max(0.05, d.double(forKey: "restMinutes")) }
+
+    /// e.g. "ctrl+opt+cmd+f". Change with `defaults write com.jayden.dimmer focusHotKey "…"`, then relaunch.
+    var focusHotKey: String { d.string(forKey: "focusHotKey") ?? "ctrl+opt+cmd+f" }
+    var menuHotKey: String { d.string(forKey: "menuHotKey") ?? "ctrl+opt+cmd+d" }
 }

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Build Dimmer.app with swiftc (no Xcode project), sign it, install to ~/Applications and relaunch.
+# Build dimmer.app with swiftc (no Xcode project), sign it, install to ~/Applications and relaunch.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-NAME=Dimmer
+NAME=dimmer
 BUNDLE_ID=com.jayden.dimmer
-VERSION=1.1.4
+VERSION=2.0.0
 BUILD=$(date +%Y%m%d%H%M)
 MIN_OS=14.0
 IDENTITY="Dimmer Dev"
@@ -91,7 +91,7 @@ if has_identity && codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID"
 else
   codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"
   echo "    !! \"$IDENTITY\" unavailable — ad-hoc signed."
-  echo "    !! Accessibility permission will NOT survive rebuilds: re-enable Dimmer in"
+  echo "    !! Accessibility permission will NOT survive rebuilds: re-enable dimmer in"
   echo "    !! System Settings › Privacy & Security › Accessibility after each build."
   echo "    !! To create the identity by hand: Keychain Access › Certificate Assistant ›"
   echo "    !! Create a Certificate… › Name \"$IDENTITY\", Self Signed Root, Code Signing."
