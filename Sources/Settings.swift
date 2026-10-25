@@ -9,7 +9,7 @@ final class Settings {
     private init() {
         d.register(defaults: [
             "dimLevel": 0.35,
-            "focusMinutes": 50,
+            "focusMinutes": 40,
             "restMinutes": 10,
             "focusHotKey": "ctrl+opt+cmd+f",
             "menuHotKey": "ctrl+opt+cmd+d",
@@ -21,7 +21,7 @@ final class Settings {
         get { d.double(forKey: "dimLevel") }
         set { d.set(newValue, forKey: "dimLevel") }
     }
-    /// Fixed at 50 / 10. Only for test runs, as launch arguments (never stored):
+    /// Fixed at 40 / 10. Only for test runs, as launch arguments (never stored):
     /// `open dimmer.app --args -focusMinutes 0.1 -restMinutes 0.1`.
     var focusMinutes: Double { max(0.05, d.double(forKey: "focusMinutes")) }
     var restMinutes: Double { max(0.05, d.double(forKey: "restMinutes")) }

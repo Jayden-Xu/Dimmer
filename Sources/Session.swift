@@ -5,31 +5,53 @@ import Foundation
 /// `due`: the focus is over (ran out, or ended early) and the break screen waits for
 /// "begin rest"; the rest counts from that click. The only timer is one wall-clock one-shot at
 /// the end of a focus or a rest (sleep counts; a deadline passed while asleep fires right on wake).
+/// A paused focus has no timer at all, only the seconds it had left.
 @MainActor
 final class Session {
     enum Phase { case idle, focus, due, rest }
 
     private(set) var phase = Phase.idle
-    private var focusStart = Date.distantPast
-    /// Start and end of the running focus or rest.
+    /// Start and end of the running focus or rest. Resuming a focus shifts both by the pause,
+    /// so `end - start` stays the full length and `now - start` the time actually focused.
     private(set) var start = Date.distantPast
     private(set) var end = Date.distantPast
+    /// Seconds left in a paused focus; nil while running.
+    private(set) var pausedLeft: TimeInterval?
     /// How long the last focus actually ran.
     private(set) var focusedMinutes = 0.0
     private var timer: DispatchSourceTimer?
 
     var onChange: (() -> Void)?
 
+    var paused: Bool { pausedLeft != nil }
+
     func startFocus() {
-        focusStart = Date()
         run(.focus, minutes: Settings.shared.focusMinutes) { [weak self] in self?.endFocus() }
     }
 
-    /// Time ran out, or ended early from the menu / hotkey.
+    /// Time ran out, or ended early from the menu / hotkey (paused or not).
     func endFocus() {
         guard phase == .focus else { return }
-        focusedMinutes = min(Date().timeIntervalSince(focusStart), end.timeIntervalSince(focusStart)) / 60
+        let total = end.timeIntervalSince(start)
+        let left = pausedLeft ?? max(0, end.timeIntervalSinceNow)
+        focusedMinutes = (total - left) / 60
         set(.due)
+    }
+
+    func togglePause() {
+        guard phase == .focus else { return }
+        if let left = pausedLeft {
+            let total = end.timeIntervalSince(start)
+            end = Date() + left
+            start = end - total
+            pausedLeft = nil
+            arm(left) { [weak self] in self?.endFocus() }
+        } else {
+            timer?.cancel()
+            timer = nil
+            pausedLeft = max(0, end.timeIntervalSinceNow)
+        }
+        onChange?()
     }
 
     func beginRest() {
@@ -43,6 +65,10 @@ final class Session {
         start = Date()
         end = start + seconds
         set(p)
+        arm(seconds, then: done)
+    }
+
+    private func arm(_ seconds: TimeInterval, then done: @escaping () -> Void) {
         let t = DispatchSource.makeTimerSource(queue: .main)
         t.setEventHandler { MainActor.assumeIsolated { done() } }
         t.schedule(wallDeadline: .now() + seconds, leeway: .seconds(1))
@@ -53,6 +79,7 @@ final class Session {
     private func set(_ p: Phase) {
         timer?.cancel()
         timer = nil
+        pausedLeft = nil
         phase = p
         onChange?()
     }

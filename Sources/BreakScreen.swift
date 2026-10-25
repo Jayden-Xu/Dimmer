@@ -57,7 +57,7 @@ final class BreakScreen {
         })
     }
 
-    /// FOCUSED / 50 MIN / [BEGIN REST], centered on a screen of `size`.
+    /// FOCUSED / 40 MIN / [BEGIN REST], centered on a screen of `size`.
     static func content(focused minutes: Double, size: NSSize, action: @escaping () -> Void) -> (NSView, PillButton) {
         let caption = label(text("FOCUSED", size: 15, weight: .bold, alpha: 0.45, kern: 3.5))
         let time = NSMutableAttributedString(attributedString: text(fmt(minutes), size: 132, weight: .semibold, alpha: 0.95, kern: 1))

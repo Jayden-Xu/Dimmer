@@ -42,11 +42,12 @@ final class SliderItemView: NSView {
 
 /// Menu header while a focus or rest runs, terminal style:
 ///
-///     FOCUS
+///     FOCUS            (FOCUS · PAUSED while paused)
 ///     38:12
 ///     ▮▮▮▮▮▮▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯
 ///
-/// Ticks once a second only while the menu is open (the view exists only then).
+/// Ticks once a second only while the menu is open (the view exists only then), and not at all
+/// while paused.
 final class TimerItemView: NSView {
     private static let segments = 25
 
@@ -54,13 +55,15 @@ final class TimerItemView: NSView {
     private let caption: String
     private let start: Date
     private let end: Date
+    private let pausedLeft: TimeInterval?
     private var timer: Timer?
 
-    init(caption: String, start: Date, end: Date, inset: CGFloat) {
+    init(caption: String, start: Date, end: Date, pausedLeft: TimeInterval? = nil, inset: CGFloat) {
         self.inset = inset
         self.caption = caption
         self.start = start
         self.end = end
+        self.pausedLeft = pausedLeft
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 86))
         autoresizingMask = .width
     }
@@ -70,7 +73,7 @@ final class TimerItemView: NSView {
     override func viewDidMoveToWindow() {
         timer?.invalidate()
         timer = nil
-        guard window != nil else { return }
+        guard window != nil, pausedLeft == nil else { return }
         // Fire on the countdown's whole seconds; .common so it runs while the menu tracks.
         let first = Date() + end.timeIntervalSinceNow.truncatingRemainder(dividingBy: 1) + 0.01
         let t = Timer(fire: first, interval: 1, repeats: true) { [weak self] _ in
@@ -86,7 +89,7 @@ final class TimerItemView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let left = max(0, end.timeIntervalSinceNow)
+        let left = pausedLeft ?? max(0, end.timeIntervalSinceNow)
         let total = end.timeIntervalSince(start)
         let secs = Int(left.rounded(.up))
         let x = inset, w = bounds.width - x - 16
@@ -120,6 +123,7 @@ protocol MenuHost: AnyObject {
     var focusHotKey: HotKey.Combo? { get }
     func setDimLevel(_ level: Double)
     func next()
+    func togglePause()
 }
 
 @MainActor
@@ -213,9 +217,12 @@ final class MenuController: NSObject, NSMenuDelegate {
         case .focus, .rest:
             let focus = session.phase == .focus
             let clock = NSMenuItem()
-            clock.view = TimerItemView(caption: focus ? "FOCUS" : "REST", start: session.start, end: session.end, inset: inset)
+            let caption = !focus ? "REST" : session.paused ? "FOCUS · PAUSED" : "FOCUS"
+            clock.view = TimerItemView(caption: caption, start: session.start, end: session.end,
+                                       pausedLeft: session.pausedLeft, inset: inset)
             menu.addItem(clock)
             menu.addItem(.separator())
+            if focus { menu.addItem(item(session.paused ? "Resume" : "Pause", #selector(togglePause))) }
             menu.addItem(withHotKey(item(focus ? "End Focus" : "End Rest", #selector(next)), host.focusHotKey))
         case .due:
             break // covered by the break screen
@@ -255,6 +262,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     // MARK: actions
 
     @objc private func next() { host?.next() }
+    @objc private func togglePause() { host?.togglePause() }
 
     @objc private func toggleLogin() {
         let svc = SMAppService.mainApp

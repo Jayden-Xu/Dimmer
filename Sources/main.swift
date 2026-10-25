@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     private func refresh() {
         // While the break screen covers everything, dimming has nothing to do.
         tracker.setActive(session.phase != .due)
-        menu.setIcon(focusing: session.phase == .focus)
+        menu.setIcon(focusing: session.phase == .focus && !session.paused)
         switch session.phase {
         case .due: breakScreen.show(focused: session.focusedMinutes)
         case .rest: break // the break screen fades out by itself
@@ -55,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
         settings.dimLevel = level
         overlays.setDim(level)
     }
+
+    func togglePause() { session.togglePause() }
 
     /// Hotkey and menu: idle → focus → break screen → rest → idle. On the break screen it is the
     /// same as "begin rest" (a way out if the screen with the button is gone).
