@@ -1,55 +1,106 @@
 import AppKit
 import ServiceManagement
 
-/// A label + NSSlider embedded in a menu item; changes apply live while dragging.
-final class SliderItemView: NSView {
-    private let label = NSTextField(labelWithString: "")
-    private let slider: NSSlider
-    private let title: String
-    private let format: (Double) -> String
+/// Menu look, shared with Pressure: text in the label color (black on the light menu), grey only for
+/// segments; values in SF Mono; bars cut into square segments.
+@MainActor
+enum Ink {
+    static let text = NSColor.labelColor
+    static let lit = NSColor.labelColor.withAlphaComponent(0.5)
+    static let unlit = NSColor.labelColor.withAlphaComponent(0.125)
+    /// Separators end this far from the right edge; values and bars end there too.
+    static let trailing: CGFloat = 16
+
+    static func mono(_ size: CGFloat, _ weight: NSFont.Weight = .medium, kern: CGFloat = 0) -> [NSAttributedString.Key: Any] {
+        [.font: NSFont.monospacedSystemFont(ofSize: size, weight: weight), .foregroundColor: text, .kern: kern]
+    }
+
+    /// `n` segments across `rect`, the first `lit` dark. Edges on whole points so every segment is equally crisp.
+    static func segments(_ n: Int, lit: Int, in rect: NSRect, gap: CGFloat = 2,
+                         on: NSColor? = nil, off: NSColor? = nil) {
+        let on = on ?? Self.lit, off = off ?? Self.unlit
+        let step = (rect.width + gap) / CGFloat(n)
+        for i in 0..<n {
+            let left = (rect.minX + CGFloat(i) * step).rounded()
+            let right = (rect.minX + CGFloat(i + 1) * step - gap).rounded()
+            (i < lit ? on : off).setFill()
+            NSRect(x: left, y: rect.minY, width: right - left, height: rect.height).fill()
+        }
+    }
+
+    /// Draws right-aligned at `right`. Kern also follows the last glyph; leave it out so the text ends flush.
+    static func drawRight(_ text: NSAttributedString, right: CGFloat, y: CGFloat) {
+        let kern = text.attribute(.kern, at: 0, effectiveRange: nil) as? CGFloat ?? 0
+        text.draw(at: NSPoint(x: right - text.size().width + kern, y: y))
+    }
+}
+
+/// The dim level as a segmented bar you click or drag, one segment per 5 %:
+///
+///     Dim                    35%
+///     ▬▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+///
+/// One drawn view instead of an NSSlider plus a text field. Changes apply live while dragging.
+final class DimItemView: NSView {
+    static let step = 0.05, minSteps = 1, maxSteps = 17  // 5 % … 85 %
+    private static let labelFont = NSFont.menuFont(ofSize: 0)
+    private static let valueFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+
+    private let inset: CGFloat
+    private var steps: Int { didSet { if steps != oldValue { needsDisplay = true; onChange?(Double(steps) * Self.step) } } }
     var onChange: ((Double) -> Void)?
 
     /// `inset`: where the menu's titles start (see MenuController.rebuild).
-    init(title: String, value: Double, min: Double, max: Double, inset: CGFloat, format: @escaping (Double) -> String) {
-        self.title = title
-        self.format = format
-        slider = NSSlider(value: value, minValue: min, maxValue: max, target: nil, action: nil)
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 46))
-        label.font = .menuFont(ofSize: 0)
-        // Line up with the menu's titles (the field draws 2 pt in); end where separators end.
-        label.frame = NSRect(x: inset - 2, y: 24, width: 228 - inset, height: 17)
-        label.stringValue = "\(title)  \(format(value))"
-        slider.frame = NSRect(x: inset - 2, y: 4, width: 228 - inset, height: 20)
-        slider.isContinuous = true
-        slider.controlSize = .small
-        slider.target = self
-        slider.action = #selector(changed)
-        // The menu widens to its widest item; stretch with it so the right edge meets the separators.
+    init(value: Double, inset: CGFloat) {
+        self.inset = inset
+        steps = min(Self.maxSteps, max(Self.minSteps, Int((value / Self.step).rounded())))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 31))
+        // The menu widens to its widest item; stretch with it so the bar ends at the separators.
         autoresizingMask = .width
-        label.autoresizingMask = .width
-        slider.autoresizingMask = .width
-        addSubview(label)
-        addSubview(slider)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    @objc private func changed() {
-        label.stringValue = "\(title)  \(format(slider.doubleValue))"
-        onChange?(slider.doubleValue)
+    private var bar: NSRect { NSRect(x: inset, y: 6, width: bounds.maxX - Ink.trailing - inset, height: 3) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let line = Self.labelFont.boundingRectForFont.height
+        let y = ((22 - line) / 2).rounded() + bounds.height - 22
+        ("Dim" as NSString).draw(at: NSPoint(x: inset, y: y), withAttributes: [.font: Self.labelFont, .foregroundColor: Ink.text])
+        // Mono value, baseline-matched to the label.
+        let value = NSAttributedString(string: "\(steps * 5)%", attributes: [.font: Self.valueFont, .foregroundColor: Ink.text])
+        Ink.drawRight(value, right: bounds.maxX - Ink.trailing, y: y + Self.labelFont.descender - Self.valueFont.descender)
+        Ink.segments(Self.maxSteps, lit: steps, in: bar)
+    }
+
+    // Own tracking loop: follows the drag even when the pointer leaves the row.
+    override func mouseDown(with event: NSEvent) {
+        set(from: event)
+        window?.trackEvents(matching: [.leftMouseDragged, .leftMouseUp], timeout: .infinity, mode: .eventTracking) { event, stop in
+            guard let event else { return }
+            MainActor.assumeIsolated {
+                self.set(from: event)
+                if event.type == .leftMouseUp { stop.pointee = true }
+            }
+        }
+    }
+
+    private func set(from event: NSEvent) {
+        let x = convert(event.locationInWindow, from: nil).x
+        let n = Int(((x - bar.minX) / bar.width * CGFloat(Self.maxSteps)).rounded(.up))
+        steps = min(Self.maxSteps, max(Self.minSteps, n))
     }
 }
 
-/// Menu header while a focus or rest runs, terminal style:
+/// Menu header while a focus or rest runs, one line over a segmented bar:
 ///
-///     FOCUS            (FOCUS · PAUSED while paused)
-///     38:12
-///     ▮▮▮▮▮▮▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯
+///     FOCUS                38:12      (FOCUS · PAUSED while paused)
+///     ▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 ///
 /// Ticks once a second only while the menu is open (the view exists only then), and not at all
 /// while paused.
 final class TimerItemView: NSView {
-    private static let segments = 25
+    private static let segments = 20
 
     private let inset: CGFloat
     private let caption: String
@@ -64,7 +115,7 @@ final class TimerItemView: NSView {
         self.start = start
         self.end = end
         self.pausedLeft = pausedLeft
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 86))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 52))
         autoresizingMask = .width
     }
 
@@ -84,34 +135,23 @@ final class TimerItemView: NSView {
         timer = t
     }
 
-    private static func mono(_ size: CGFloat, _ weight: NSFont.Weight, _ color: NSColor, kern: CGFloat = 0) -> [NSAttributedString.Key: Any] {
-        [.font: NSFont.monospacedSystemFont(ofSize: size, weight: weight), .foregroundColor: color, .kern: kern]
-    }
-
     override func draw(_ dirtyRect: NSRect) {
         let left = pausedLeft ?? max(0, end.timeIntervalSinceNow)
         let total = end.timeIntervalSince(start)
         let secs = Int(left.rounded(.up))
-        let x = inset, w = bounds.width - x - 16
-        // Dark grey on a light menu, light grey on a dark one.
-        let ink = NSColor.labelColor.withAlphaComponent(0.7)
+        let x = inset, right = bounds.maxX - Ink.trailing
 
-        NSAttributedString(string: caption, attributes: Self.mono(10, .semibold, .secondaryLabelColor, kern: 1.5))
-            .draw(at: NSPoint(x: x, y: 62))
+        // Caption and countdown share a baseline.
+        let time = NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60), attributes: Ink.mono(24, kern: 0.5))
+        let label = NSAttributedString(string: caption, attributes: Ink.mono(11, kern: 1))
+        let timeFont = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
+        let labelFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        let ty: CGFloat = 16
+        Ink.drawRight(time, right: right, y: ty)
+        label.draw(at: NSPoint(x: x, y: ty - timeFont.descender + labelFont.descender))
 
-        // 38:12
-        NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60),
-                           attributes: Self.mono(30, .medium, ink, kern: 1))
-            .draw(at: NSPoint(x: x - 1, y: 20))
-
-        // Segmented progress.
-        let n = Self.segments, gap: CGFloat = 2
-        let seg = (w - gap * CGFloat(n - 1)) / CGFloat(n)
-        let done = total > 0 ? Int((Double(n) * (1 - left / total)).rounded(.down)) : n
-        for i in 0..<n {
-            (i < done ? ink : NSColor.quaternaryLabelColor).setFill()
-            NSRect(x: x + CGFloat(i) * (seg + gap), y: 10, width: seg, height: 6).fill()
-        }
+        let done = total > 0 ? Int((Double(Self.segments) * (1 - left / total)).rounded(.down)) : Self.segments
+        Ink.segments(Self.segments, lit: done, in: NSRect(x: x, y: 8, width: right - x, height: 3))
     }
 }
 
@@ -229,7 +269,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        let slider = SliderItemView(title: "Dim", value: settings.dimLevel, min: 0.05, max: 0.85, inset: inset) { "\(Int(($0 * 100).rounded()))%" }
+        let slider = DimItemView(value: settings.dimLevel, inset: inset)
         slider.onChange = { [weak self] v in self?.host?.setDimLevel(v) }
         let sliderItem = NSMenuItem()
         sliderItem.view = slider

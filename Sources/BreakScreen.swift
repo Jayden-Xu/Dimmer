@@ -57,27 +57,26 @@ final class BreakScreen {
         })
     }
 
-    /// FOCUSED / 40 MIN / [BEGIN REST], centered on a screen of `size`.
-    static func content(focused minutes: Double, size: NSSize, action: @escaping () -> Void) -> (NSView, PillButton) {
-        let caption = label(text("FOCUSED", size: 15, weight: .bold, alpha: 0.45, kern: 3.5))
-        let time = NSMutableAttributedString(attributedString: text(fmt(minutes), size: 132, weight: .semibold, alpha: 0.95, kern: 1))
-        time.append(text(" MIN", size: 34, weight: .bold, alpha: 0.5, kern: 2))
-        let button = PillButton(title: "BEGIN REST", action: action)
-        return (stack([caption, label(time), button], gaps: [0, 40], in: size), button)
+    /// FOCUSED / 40 MIN / [BEGIN REST], centered on a screen of `size`. Same look as the menu:
+    /// SF Mono, uppercase labels with tracking, text at full strength, grey only for fills.
+    static func content(focused minutes: Double, size: NSSize, action: @escaping () -> Void) -> (NSView, FlatButton) {
+        let caption = label(text("FOCUSED", size: 14, weight: .medium, alpha: 0.9, kern: 4))
+        let time = NSMutableAttributedString(attributedString: text(fmt(minutes), size: 120, weight: .medium, alpha: 0.9, kern: 2))
+        time.addAttribute(.kern, value: 14, range: NSRange(location: time.length - 1, length: 1))  // a mono space is too wide
+        time.append(text("MIN", size: 28, weight: .medium, alpha: 0.9, kern: 3))
+        let button = FlatButton(title: "BEGIN REST", action: action)
+        // How much of the focus ran, cut like the menu's countdown bar: full unless it was ended early.
+        let bar = Segments(fraction: minutes / Settings.shared.focusMinutes, width: button.frame.width)
+        return (stack([caption, label(time), bar, button], gaps: [4, 20, 36], in: size), button)
     }
 
     static func fmt(_ m: Double) -> String { m >= 1 ? "\(Int(m.rounded()))" : "<1" }
-    /// SF Pro Rounded: softer than the default face at display sizes.
-    static func rounded(_ size: CGFloat, _ weight: NSFont.Weight) -> NSFont {
-        let f = NSFont.systemFont(ofSize: size, weight: weight)
-        return f.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? f
-    }
 
     static func text(_ s: String, size: CGFloat, weight: NSFont.Weight, alpha: CGFloat, kern: CGFloat) -> NSAttributedString {
         let center = NSMutableParagraphStyle()
         center.alignment = .center
         let t = NSMutableAttributedString(string: s, attributes: [
-            .font: rounded(size, weight),
+            .font: NSFont.monospacedSystemFont(ofSize: size, weight: weight),
             .foregroundColor: NSColor(white: 1, alpha: alpha),
             .paragraphStyle: center,
         ])
@@ -108,10 +107,27 @@ final class BreakScreen {
     }
 }
 
-/// A soft, translucent capsule with rounded uppercase text. Hover brightens it, pressing dims it;
+/// The menu's segmented bar in white on the dark screen.
+private final class Segments: NSView {
+    private let lit: Int
+
+    init(fraction: Double, width: CGFloat) {
+        lit = Int((min(1, fraction) * 20).rounded())
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 3))
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Ink.segments(20, lit: lit, in: bounds, on: NSColor(white: 1, alpha: 0.5), off: NSColor(white: 1, alpha: 0.125))
+    }
+}
+
+/// A flat, square-cornered translucent button with mono uppercase text, like a menu bar segment.
+/// Hover brightens it, pressing dims it;
 /// the click counts on release inside. Each change is one layer colour change that the system
 /// animates: nothing runs while the pointer stays still.
-final class PillButton: NSView {
+final class FlatButton: NSView {
     private let action: () -> Void
     var title: String { didSet { needsDisplay = true } }
     private var hovered = false { didSet { restyle() } }
@@ -120,10 +136,9 @@ final class PillButton: NSView {
     init(title: String, action: @escaping () -> Void) {
         self.title = title
         self.action = action
-        super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 60))
+        super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 52))
         wantsLayer = true
-        layer?.cornerRadius = 30
-        layer?.backgroundColor = NSColor(white: 1, alpha: 0.14).cgColor
+        layer?.backgroundColor = NSColor(white: 1, alpha: 0.12).cgColor
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }
@@ -131,7 +146,7 @@ final class PillButton: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func restyle() {
-        let alpha: CGFloat = pressed ? 0.08 : hovered ? 0.24 : 0.14
+        let alpha: CGFloat = pressed ? 0.06 : hovered ? 0.2 : 0.12
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = pressed ? 0.06 : 0.18
             ctx.allowsImplicitAnimation = true
@@ -154,7 +169,7 @@ final class PillButton: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let s = BreakScreen.text(title, size: 16, weight: .bold, alpha: 0.9, kern: 2)
+        let s = BreakScreen.text(title, size: 14, weight: .medium, alpha: 0.9, kern: 3)
         let size = s.size()
         s.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
     }
@@ -162,7 +177,7 @@ final class PillButton: NSView {
 
 /// Non-activating panel: it can take the keyboard (and swallow it) without activating dimmer.
 private final class BreakWindow: NSPanel {
-    var button: PillButton?
+    var button: FlatButton?
 
     init(frame: NSRect) {
         super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
