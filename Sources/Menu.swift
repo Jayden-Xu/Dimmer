@@ -94,7 +94,7 @@ final class DimItemView: NSView {
 
 /// Menu header while a focus or rest runs, one line over a segmented bar:
 ///
-///     FOCUS                38:12      (FOCUS · PAUSED while paused)
+///     FOCUS                38:12      (FOCUS · PAUSED while paused; caption centered on the digits)
 ///     ▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 ///
 /// Ticks once a second only while the menu is open (the view exists only then), and not at all
@@ -141,14 +141,15 @@ final class TimerItemView: NSView {
         let secs = Int(left.rounded(.up))
         let x = inset, right = bounds.maxX - Ink.trailing
 
-        // Caption and countdown share a baseline.
+        // Caption centered on the countdown digits.
         let time = NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60), attributes: Ink.mono(24, kern: 0.5))
         let label = NSAttributedString(string: caption, attributes: Ink.mono(11, kern: 1))
         let timeFont = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
         let labelFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
         let ty: CGFloat = 18
         Ink.drawRight(time, right: right, y: ty)
-        label.draw(at: NSPoint(x: x, y: ty - timeFont.descender + labelFont.descender))
+        let middle = ty - timeFont.descender + timeFont.capHeight / 2
+        label.draw(at: NSPoint(x: x, y: (middle - labelFont.capHeight / 2 + labelFont.descender).rounded()))
 
         let done = total > 0 ? Int((Double(Self.segments) * (1 - left / total)).rounded(.down)) : Self.segments
         // Thicker than the Dim bar: this one is the readout, that one a control.
