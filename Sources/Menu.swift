@@ -115,7 +115,7 @@ final class TimerItemView: NSView {
         self.start = start
         self.end = end
         self.pausedLeft = pausedLeft
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 52))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 54))
         autoresizingMask = .width
     }
 
@@ -146,12 +146,13 @@ final class TimerItemView: NSView {
         let label = NSAttributedString(string: caption, attributes: Ink.mono(11, kern: 1))
         let timeFont = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
         let labelFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        let ty: CGFloat = 16
+        let ty: CGFloat = 18
         Ink.drawRight(time, right: right, y: ty)
         label.draw(at: NSPoint(x: x, y: ty - timeFont.descender + labelFont.descender))
 
         let done = total > 0 ? Int((Double(Self.segments) * (1 - left / total)).rounded(.down)) : Self.segments
-        Ink.segments(Self.segments, lit: done, in: NSRect(x: x, y: 8, width: right - x, height: 3))
+        // Thicker than the Dim bar: this one is the readout, that one a control.
+        Ink.segments(Self.segments, lit: done, in: NSRect(x: x, y: 8, width: right - x, height: 5))
     }
 }
 
