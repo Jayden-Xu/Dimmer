@@ -62,25 +62,32 @@ enum Ink {
     }
 }
 
-/// The dim level as a segmented bar you click or drag, one segment per 5 %:
+/// A setting as a segmented bar you click or drag, one segment per step (Focus, Rest, Dim):
 ///
 ///     Dim                    35%
 ///     ▬▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 ///
 /// One drawn view instead of an NSSlider plus a text field. Changes apply live while dragging.
-final class DimItemView: NSView {
-    static let step = 0.05, minSteps = 1, maxSteps = 17  // 5 % … 85 %
+/// All bars have 17 segments, so their segments line up in one column grid.
+final class StepBarView: NSView {
+    static let count = 17
     private static let labelFont = NSFont.menuFont(ofSize: 0)
     private static let valueFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
 
+    private let label: String
     private let inset: CGFloat
-    private var steps: Int { didSet { if steps != oldValue { needsDisplay = true; onChange?(Double(steps) * Self.step) } } }
-    var onChange: ((Double) -> Void)?
+    private let format: (Int) -> String
+    private let onChange: (Int) -> Void
+    /// 1...count.
+    private var steps: Int { didSet { if steps != oldValue { needsDisplay = true; onChange(steps) } } }
 
     /// `inset`: where the menu's titles start (see MenuController.rebuild).
-    init(value: Double, inset: CGFloat) {
+    init(_ label: String, steps: Int, inset: CGFloat, format: @escaping (Int) -> String, onChange: @escaping (Int) -> Void) {
+        self.label = label
         self.inset = inset
-        steps = min(Self.maxSteps, max(Self.minSteps, Int((value / Self.step).rounded())))
+        self.format = format
+        self.onChange = onChange
+        self.steps = min(Self.count, max(1, steps))
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 31))
         // The menu widens to its widest item; stretch with it so the bar ends at the separators.
         autoresizingMask = .width
@@ -93,11 +100,11 @@ final class DimItemView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let line = Self.labelFont.boundingRectForFont.height
         let y = ((22 - line) / 2).rounded() + bounds.height - 22
-        ("Dim" as NSString).draw(at: NSPoint(x: inset, y: y), withAttributes: [.font: Self.labelFont, .foregroundColor: Ink.text])
+        (label as NSString).draw(at: NSPoint(x: inset, y: y), withAttributes: [.font: Self.labelFont, .foregroundColor: Ink.text])
         // Mono value, baseline-matched to the label.
-        let value = NSAttributedString(string: "\(steps * 5)%", attributes: [.font: Self.valueFont, .foregroundColor: Ink.text])
+        let value = NSAttributedString(string: format(steps), attributes: [.font: Self.valueFont, .foregroundColor: Ink.text])
         Ink.drawRight(value, right: bounds.maxX - Ink.trailing, y: y + Self.labelFont.descender - Self.valueFont.descender)
-        Ink.segments(Self.maxSteps, lit: steps, in: bar)
+        Ink.segments(Self.count, lit: steps, in: bar)
     }
 
     // Own tracking loop: follows the drag even when the pointer leaves the row.
@@ -114,8 +121,8 @@ final class DimItemView: NSView {
 
     private func set(from event: NSEvent) {
         let x = convert(event.locationInWindow, from: nil).x
-        let n = Int(((x - bar.minX) / bar.width * CGFloat(Self.maxSteps)).rounded(.up))
-        steps = min(Self.maxSteps, max(Self.minSteps, n))
+        let n = Int(((x - bar.minX) / bar.width * CGFloat(Self.count)).rounded(.up))
+        steps = min(Self.count, max(1, n))
     }
 }
 
@@ -168,10 +175,12 @@ final class TimerItemView: NSView {
 /// Menu header between a focus and its rest: how long the focus ran, still and without a timer.
 final class FocusedItemView: NSView {
     private let minutes: Double
+    private let fraction: Double
     private let inset: CGFloat
 
-    init(minutes: Double, inset: CGFloat) {
+    init(minutes: Double, fraction: Double, inset: CGFloat) {
         self.minutes = minutes
+        self.fraction = fraction
         self.inset = inset
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 54))
         autoresizingMask = .width
@@ -181,7 +190,7 @@ final class FocusedItemView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         Ink.readout(caption: "FOCUSED", value: Ink.minutes(EndScreen.fmt(minutes)),
-                    fraction: minutes / Settings.shared.focusMinutes, in: bounds, inset: inset)
+                    fraction: fraction, in: bounds, inset: inset)
     }
 }
 
@@ -283,7 +292,7 @@ final class MenuController: NSObject, NSMenuDelegate {
 
         switch session.phase {
         case .idle:
-            menu.addItem(withHotKey(item("Start Focus · \(EndScreen.fmt(settings.focusMinutes)) min", #selector(next)), host.focusHotKey))
+            menu.addItem(withHotKey(item("Start Focus", #selector(next)), host.focusHotKey))
         case .focus, .rest:
             let focus = session.phase == .focus
             let clock = NSMenuItem()
@@ -296,18 +305,20 @@ final class MenuController: NSObject, NSMenuDelegate {
             menu.addItem(withHotKey(item(focus ? "End Focus" : "End Rest", #selector(next)), host.focusHotKey))
         case .due:
             let header = NSMenuItem()
-            header.view = FocusedItemView(minutes: session.focusedMinutes, inset: inset)
+            header.view = FocusedItemView(minutes: session.focusedMinutes, fraction: session.focusedFraction, inset: inset)
             menu.addItem(header)
             menu.addItem(.separator())
-            menu.addItem(withHotKey(item("Start Rest · \(EndScreen.fmt(settings.restMinutes)) min", #selector(next)), host.focusHotKey))
+            menu.addItem(withHotKey(item("Start Rest", #selector(next)), host.focusHotKey))
         }
 
+        // Lengths apply from the next focus / rest on; the running one keeps its own.
         menu.addItem(.separator())
-        let slider = DimItemView(value: settings.dimLevel, inset: inset)
-        slider.onChange = { [weak self] v in self?.host?.setDimLevel(v) }
-        let sliderItem = NSMenuItem()
-        sliderItem.view = slider
-        menu.addItem(sliderItem)
+        let s = settings
+        bar("Focus", steps: Int((s.focusMinutes / 5).rounded()), inset: inset, format: { "\($0 * 5) min" }) { s.focusMinutes = Double($0 * 5) }
+        bar("Rest", steps: Int(s.restMinutes.rounded()), inset: inset, format: { "\($0) min" }) { s.restMinutes = Double($0) }
+        bar("Dim", steps: Int((s.dimLevel * 20).rounded()), inset: inset, format: { "\($0 * 5)%" }) { [weak self] in
+            self?.host?.setDimLevel(Double($0) / 20)
+        }
 
         menu.addItem(.separator())
         let login = item("Launch at Login", #selector(toggleLogin))
@@ -317,6 +328,13 @@ final class MenuController: NSObject, NSMenuDelegate {
             menu.addItem(item("Grant Accessibility Access…", #selector(openAXSettings)))
         }
         menu.addItem(item("Quit", #selector(quit), key: "q"))
+    }
+
+    private func bar(_ label: String, steps: Int, inset: CGFloat, format: @escaping (Int) -> String,
+                     onChange: @escaping (Int) -> Void) {
+        let it = NSMenuItem()
+        it.view = StepBarView(label, steps: steps, inset: inset, format: format, onChange: onChange)
+        menu.addItem(it)
     }
 
     private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {

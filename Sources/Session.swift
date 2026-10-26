@@ -17,8 +17,9 @@ final class Session {
     private(set) var end = Date.distantPast
     /// Seconds left in a paused focus; nil while running.
     private(set) var pausedLeft: TimeInterval?
-    /// How long the last focus actually ran.
+    /// How long the last focus actually ran, and that as a share of its planned length.
     private(set) var focusedMinutes = 0.0
+    private(set) var focusedFraction = 0.0
     private var timer: DispatchSourceTimer?
 
     var onChange: (() -> Void)?
@@ -42,6 +43,7 @@ final class Session {
         let total = end.timeIntervalSince(start)
         let left = pausedLeft ?? max(0, end.timeIntervalSinceNow)
         focusedMinutes = (total - left) / 60
+        focusedFraction = total > 0 ? (total - left) / total : 1
         set(.due)
     }
 
