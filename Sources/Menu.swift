@@ -30,8 +30,35 @@ enum Ink {
 
     /// Draws right-aligned at `right`. Kern also follows the last glyph; leave it out so the text ends flush.
     static func drawRight(_ text: NSAttributedString, right: CGFloat, y: CGFloat) {
-        let kern = text.attribute(.kern, at: 0, effectiveRange: nil) as? CGFloat ?? 0
+        let kern = text.attribute(.kern, at: max(0, text.length - 1), effectiveRange: nil) as? CGFloat ?? 0
         text.draw(at: NSPoint(x: right - text.size().width + kern, y: y))
+    }
+
+    /// "40 MIN": the number at the countdown's size, the unit small on its baseline.
+    static func minutes(_ n: String) -> NSAttributedString {
+        let s = NSMutableAttributedString(string: n, attributes: mono(24, kern: 0.5))
+        s.addAttribute(.kern, value: 4, range: NSRange(location: s.length - 1, length: 1))
+        s.append(NSAttributedString(string: "MIN", attributes: mono(11, kern: 1)))
+        return s
+    }
+
+    /// The countdown row (menu header, focus-over card), 54 pt tall:
+    ///
+    ///     FOCUS                38:12      (caption centered on the 24 pt digits)
+    ///     ▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+    static func readout(caption: String, value: NSAttributedString, fraction: Double, in bounds: NSRect, inset: CGFloat) {
+        let x = inset, right = bounds.maxX - trailing
+        let timeFont = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
+        let labelFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        let ty: CGFloat = 18
+        drawRight(value, right: right, y: ty)
+        let middle = ty - timeFont.descender + timeFont.capHeight / 2
+        NSAttributedString(string: caption, attributes: mono(11, kern: 1))
+            .draw(at: NSPoint(x: x, y: (middle - labelFont.capHeight / 2 + labelFont.descender).rounded()))
+        let n = 20
+        let lit = Int((Double(n) * min(1, max(0, fraction))).rounded(.down))
+        // Thicker than the Dim bar: this one is the readout, that one a control.
+        segments(n, lit: lit, in: NSRect(x: x, y: 8, width: right - x, height: 5))
     }
 }
 
@@ -92,16 +119,10 @@ final class DimItemView: NSView {
     }
 }
 
-/// Menu header while a focus or rest runs, one line over a segmented bar:
-///
-///     FOCUS                38:12      (FOCUS · PAUSED while paused; caption centered on the digits)
-///     ▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-///
+/// Menu header while a focus or rest runs (Ink.readout; FOCUS · PAUSED while paused).
 /// Ticks once a second only while the menu is open (the view exists only then), and not at all
 /// while paused.
 final class TimerItemView: NSView {
-    private static let segments = 20
-
     private let inset: CGFloat
     private let caption: String
     private let start: Date
@@ -139,21 +160,28 @@ final class TimerItemView: NSView {
         let left = pausedLeft ?? max(0, end.timeIntervalSinceNow)
         let total = end.timeIntervalSince(start)
         let secs = Int(left.rounded(.up))
-        let x = inset, right = bounds.maxX - Ink.trailing
-
-        // Caption centered on the countdown digits.
         let time = NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60), attributes: Ink.mono(24, kern: 0.5))
-        let label = NSAttributedString(string: caption, attributes: Ink.mono(11, kern: 1))
-        let timeFont = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
-        let labelFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        let ty: CGFloat = 18
-        Ink.drawRight(time, right: right, y: ty)
-        let middle = ty - timeFont.descender + timeFont.capHeight / 2
-        label.draw(at: NSPoint(x: x, y: (middle - labelFont.capHeight / 2 + labelFont.descender).rounded()))
+        Ink.readout(caption: caption, value: time, fraction: total > 0 ? 1 - left / total : 1, in: bounds, inset: inset)
+    }
+}
 
-        let done = total > 0 ? Int((Double(Self.segments) * (1 - left / total)).rounded(.down)) : Self.segments
-        // Thicker than the Dim bar: this one is the readout, that one a control.
-        Ink.segments(Self.segments, lit: done, in: NSRect(x: x, y: 8, width: right - x, height: 5))
+/// Menu header between a focus and its rest: how long the focus ran, still and without a timer.
+final class FocusedItemView: NSView {
+    private let minutes: Double
+    private let inset: CGFloat
+
+    init(minutes: Double, inset: CGFloat) {
+        self.minutes = minutes
+        self.inset = inset
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 54))
+        autoresizingMask = .width
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Ink.readout(caption: "FOCUSED", value: Ink.minutes(Reminder.fmt(minutes)),
+                    fraction: minutes / Settings.shared.focusMinutes, in: bounds, inset: inset)
     }
 }
 
@@ -255,7 +283,7 @@ final class MenuController: NSObject, NSMenuDelegate {
 
         switch session.phase {
         case .idle:
-            menu.addItem(withHotKey(item("Start Focus · \(BreakScreen.fmt(settings.focusMinutes)) min", #selector(next)), host.focusHotKey))
+            menu.addItem(withHotKey(item("Start Focus · \(Reminder.fmt(settings.focusMinutes)) min", #selector(next)), host.focusHotKey))
         case .focus, .rest:
             let focus = session.phase == .focus
             let clock = NSMenuItem()
@@ -267,7 +295,11 @@ final class MenuController: NSObject, NSMenuDelegate {
             if focus { menu.addItem(item(session.paused ? "Resume" : "Pause", #selector(togglePause))) }
             menu.addItem(withHotKey(item(focus ? "End Focus" : "End Rest", #selector(next)), host.focusHotKey))
         case .due:
-            break // covered by the break screen
+            let header = NSMenuItem()
+            header.view = FocusedItemView(minutes: session.focusedMinutes, inset: inset)
+            menu.addItem(header)
+            menu.addItem(.separator())
+            menu.addItem(withHotKey(item("Start Rest · \(Reminder.fmt(settings.restMinutes)) min", #selector(next)), host.focusHotKey))
         }
 
         menu.addItem(.separator())

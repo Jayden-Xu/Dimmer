@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     private var tracker: FocusTracker!
     private var menu: MenuController!
     private let hotKeys = HotKey()
-    private let breakScreen = BreakScreen()
+    private let reminder = Reminder()
     let session = Session()
     private(set) var focusHotKey: HotKey.Combo?
 
@@ -17,34 +17,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
         tracker = FocusTracker(overlays: overlays)
         menu = MenuController(host: self)
         focusHotKey = hotKeys.register(settings.focusHotKey, fallback: "ctrl+opt+cmd+f") { [weak self] in self?.next() }
-        hotKeys.register(settings.menuHotKey, fallback: "ctrl+opt+cmd+d") { [weak self] in
-            // Nothing to show while the break screen covers the menu bar.
-            guard let self, session.phase != .due else { return }
-            menu.open()
-        }
+        hotKeys.register(settings.menuHotKey, fallback: "ctrl+opt+cmd+d") { [weak self] in self?.menu.open() }
 
         session.onChange = { [weak self] in
             self?.menu.close()
             self?.refresh()
         }
-        breakScreen.onBegin = { [weak self] in
-            self?.session.beginRest()
-            return self?.session.end ?? Date()
-        }
 
         tracker.start()
+        tracker.setActive(true)
         refresh()
     }
 
     private func refresh() {
-        // While the break screen covers everything, dimming has nothing to do.
-        tracker.setActive(session.phase != .due)
         menu.setIcon(focusing: session.phase == .focus && !session.paused)
-        switch session.phase {
-        case .due: breakScreen.show(focused: session.focusedMinutes)
-        case .rest: break // the break screen fades out by itself
-        case .idle, .focus: breakScreen.dismiss()
-        }
+        if session.phase == .due { reminder.show(focused: session.focusedMinutes) } else { reminder.dismiss() }
     }
 
     // MARK: MenuHost
@@ -58,13 +45,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
 
     func togglePause() { session.togglePause() }
 
-    /// Hotkey and menu: idle → focus → break screen → rest → idle. On the break screen it is the
-    /// same as "begin rest" (a way out if the screen with the button is gone).
+    /// Hotkey and menu: idle → focus → (focus over) → rest → idle.
     func next() {
         switch session.phase {
         case .idle: session.startFocus()
         case .focus: session.endFocus()
-        case .due: breakScreen.begin()
+        case .due: session.beginRest()
         case .rest: session.stop()
         }
     }

@@ -2,8 +2,8 @@ import Foundation
 
 /// idle → focus → due → rest → idle.
 ///
-/// `due`: the focus is over (ran out, or ended early) and the break screen waits for
-/// "begin rest"; the rest counts from that click. The only timer is one wall-clock one-shot at
+/// `due`: the focus is over (ran out, or ended early) and a reminder card is up; the rest starts,
+/// and counts, from "Start Rest" in the menu or the hotkey. The only timer is one wall-clock one-shot at
 /// the end of a focus or a rest (sleep counts; a deadline passed while asleep fires right on wake).
 /// A paused focus has no timer at all, only the seconds it had left.
 @MainActor
