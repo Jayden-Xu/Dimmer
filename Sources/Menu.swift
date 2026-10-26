@@ -42,7 +42,7 @@ enum Ink {
         return s
     }
 
-    /// The countdown row (menu header, focus-over card), 54 pt tall:
+    /// The countdown row (menu header), 54 pt tall:
     ///
     ///     FOCUS                38:12      (caption centered on the 24 pt digits)
     ///     ▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
@@ -180,7 +180,7 @@ final class FocusedItemView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func draw(_ dirtyRect: NSRect) {
-        Ink.readout(caption: "FOCUSED", value: Ink.minutes(Reminder.fmt(minutes)),
+        Ink.readout(caption: "FOCUSED", value: Ink.minutes(EndScreen.fmt(minutes)),
                     fraction: minutes / Settings.shared.focusMinutes, in: bounds, inset: inset)
     }
 }
@@ -283,7 +283,7 @@ final class MenuController: NSObject, NSMenuDelegate {
 
         switch session.phase {
         case .idle:
-            menu.addItem(withHotKey(item("Start Focus · \(Reminder.fmt(settings.focusMinutes)) min", #selector(next)), host.focusHotKey))
+            menu.addItem(withHotKey(item("Start Focus · \(EndScreen.fmt(settings.focusMinutes)) min", #selector(next)), host.focusHotKey))
         case .focus, .rest:
             let focus = session.phase == .focus
             let clock = NSMenuItem()
@@ -299,7 +299,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             header.view = FocusedItemView(minutes: session.focusedMinutes, inset: inset)
             menu.addItem(header)
             menu.addItem(.separator())
-            menu.addItem(withHotKey(item("Start Rest · \(Reminder.fmt(settings.restMinutes)) min", #selector(next)), host.focusHotKey))
+            menu.addItem(withHotKey(item("Start Rest · \(EndScreen.fmt(settings.restMinutes)) min", #selector(next)), host.focusHotKey))
         }
 
         menu.addItem(.separator())

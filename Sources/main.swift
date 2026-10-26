@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     private var tracker: FocusTracker!
     private var menu: MenuController!
     private let hotKeys = HotKey()
-    private let reminder = Reminder()
+    private let endScreen = EndScreen()
     let session = Session()
     private(set) var focusHotKey: HotKey.Combo?
 
@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
             self?.menu.close()
             self?.refresh()
         }
+        session.onTimeUp = { [weak self] phase, minutes in
+            self?.endScreen.show(phase == .focus ? "FOCUSED" : "RESTED", minutes: minutes)
+        }
 
         tracker.start()
         tracker.setActive(true)
@@ -31,7 +34,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
 
     private func refresh() {
         menu.setIcon(focusing: session.phase == .focus && !session.paused)
-        if session.phase == .due { reminder.show(focused: session.focusedMinutes) } else { reminder.dismiss() }
     }
 
     // MARK: MenuHost

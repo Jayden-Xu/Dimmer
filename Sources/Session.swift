@@ -2,8 +2,8 @@ import Foundation
 
 /// idle → focus → due → rest → idle.
 ///
-/// `due`: the focus is over (ran out, or ended early) and a reminder card is up; the rest starts,
-/// and counts, from "Start Rest" in the menu or the hotkey. The only timer is one wall-clock one-shot at
+/// `due`: the focus is over (ran out, or ended early); the rest starts, and counts, from
+/// "Start Rest" in the menu or the hotkey. The only timer is one wall-clock one-shot at
 /// the end of a focus or a rest (sleep counts; a deadline passed while asleep fires right on wake).
 /// A paused focus has no timer at all, only the seconds it had left.
 @MainActor
@@ -22,11 +22,18 @@ final class Session {
     private var timer: DispatchSourceTimer?
 
     var onChange: (() -> Void)?
+    /// A focus or rest ran out by itself (not ended by hand): the phase that ended and its minutes.
+    var onTimeUp: ((Phase, Double) -> Void)?
 
     var paused: Bool { pausedLeft != nil }
 
     func startFocus() {
-        run(.focus, minutes: Settings.shared.focusMinutes) { [weak self] in self?.endFocus() }
+        run(.focus, minutes: Settings.shared.focusMinutes) { [weak self] in self?.focusRanOut() }
+    }
+
+    private func focusRanOut() {
+        endFocus()
+        onTimeUp?(.focus, focusedMinutes)
     }
 
     /// Time ran out, or ended early from the menu / hotkey (paused or not).
@@ -45,7 +52,7 @@ final class Session {
             end = Date() + left
             start = end - total
             pausedLeft = nil
-            arm(left) { [weak self] in self?.endFocus() }
+            arm(left) { [weak self] in self?.focusRanOut() }
         } else {
             timer?.cancel()
             timer = nil
@@ -55,7 +62,12 @@ final class Session {
     }
 
     func beginRest() {
-        run(.rest, minutes: Settings.shared.restMinutes) { [weak self] in self?.stop() }
+        run(.rest, minutes: Settings.shared.restMinutes) { [weak self] in
+            guard let self else { return }
+            let minutes = end.timeIntervalSince(start) / 60
+            stop()
+            onTimeUp?(.rest, minutes)
+        }
     }
 
     func stop() { set(.idle) }
