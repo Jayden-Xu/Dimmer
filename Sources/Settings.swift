@@ -17,12 +17,12 @@ final class Settings {
         ])
     }
 
-    /// Black overlay alpha, 0...1.
+    /// Black overlay alpha, 0...1 in 5 % steps: 0 = no dimming (overlays hidden), 1 = solid black.
     var dimLevel: Double {
         get { d.double(forKey: "dimLevel") }
         set { d.set(newValue, forKey: "dimLevel") }
     }
-    /// Set from the menu: focus 5–85 min in 5 min steps, rest 1–17 min.
+    /// Set from the menu: focus 5–100 min in 5 min steps, rest 1–20 min.
     /// Test runs can override them with launch arguments (never stored):
     /// `open dimmer.app --args -focusMinutes 0.1 -restMinutes 0.1`.
     var focusMinutes: Double {

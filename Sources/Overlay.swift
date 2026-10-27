@@ -110,11 +110,16 @@ final class Overlays {
         self.dim = dim
         let color = OverlayWindow.color(dim)
         for w in all { w.backgroundColor = color }
+        if dim == 0 { hideAll() }
     }
 
     /// Instantly set each window's alpha (0 = hidden, 1 = shown). Never orderOut: re-ordering in can flash.
+    /// At dim 0 everything stays hidden: a clear window would still be composited.
     func setAlpha(_ changes: [(OverlayWindow, CGFloat)]) {
-        for (w, a) in changes where w.alphaValue != a { w.alphaValue = a }
+        for (w, a) in changes {
+            let a = dim > 0 ? a : 0
+            if w.alphaValue != a { w.alphaValue = a }
+        }
     }
 
     /// Hide every overlay, including other Spaces' (effect turned off).

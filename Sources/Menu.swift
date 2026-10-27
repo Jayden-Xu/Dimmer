@@ -28,10 +28,11 @@ enum Ink {
         }
     }
 
-    /// `n` segments around a 240° arc open at the bottom, like Pressure's gauge, lit clockwise from
-    /// the lower left. Square-cut: each gap is `gap` wide across the ring, not a fixed angle.
-    static func ring(_ n: Int, lit: Int, center c: NSPoint, radius r: CGFloat, width w: CGFloat, gap: CGFloat = 2) {
-        let sweep: CGFloat = 240, start: CGFloat = 210
+    /// `n` segments around an arc of `sweep` degrees open at the bottom, lit clockwise from the left.
+    /// Square-cut: each gap is `gap` wide across the ring, not a fixed angle.
+    static func ring(_ n: Int, lit: Int, center c: NSPoint, radius r: CGFloat, width w: CGFloat,
+                     gap: CGFloat = 2, sweep: CGFloat = 240) {
+        let start = 90 + sweep / 2
         let gapDeg = gap / (r - w / 2) * 180 / .pi
         let seg = (sweep - CGFloat(n - 1) * gapDeg) / CGFloat(n)
         for i in 0..<n {
@@ -49,6 +50,13 @@ enum Ink {
     static func drawRight(_ text: NSAttributedString, right: CGFloat, y: CGFloat) {
         let kern = text.attribute(.kern, at: max(0, text.length - 1), effectiveRange: nil) as? CGFloat ?? 0
         text.draw(at: NSPoint(x: right - text.size().width + kern, y: y))
+    }
+
+    /// Draws centered on `x` with its first font's baseline at `baseline`, kern after the last glyph left out.
+    static func drawCentered(_ text: NSAttributedString, x: CGFloat, baseline: CGFloat) {
+        let kern = text.attribute(.kern, at: max(0, text.length - 1), effectiveRange: nil) as? CGFloat ?? 0
+        let descender = (text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.descender ?? 0
+        text.draw(at: NSPoint(x: (x - (text.size().width - kern) / 2).rounded(), y: baseline + descender))
     }
 
     /// Redraws `view` on the whole seconds of a countdown to `end`; .common so it runs while the menu tracks.
@@ -69,9 +77,9 @@ enum Ink {
 ///     ▬▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 ///
 /// One drawn view instead of an NSSlider plus a text field. Changes apply live while dragging.
-/// All bars have 17 segments, so their segments line up in one column grid.
+/// All bars have 20 segments, so their segments line up in one column grid.
 final class StepBarView: NSView {
-    static let count = 17
+    static let count = 20
     private static let labelFont = NSFont.menuFont(ofSize: 0)
     private static let valueFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
 
@@ -79,16 +87,20 @@ final class StepBarView: NSView {
     private let inset: CGFloat
     private let format: (Int) -> String
     private let onChange: (Int) -> Void
-    /// 1...count.
+    /// The fewest lit segments: 1, or 0 when an empty bar means something (Dim off).
+    private let least: Int
+    /// least...count.
     private var steps: Int { didSet { if steps != oldValue { needsDisplay = true; onChange(steps) } } }
 
     /// `inset`: where the menu's titles start (see MenuController.rebuild).
-    init(_ label: String, steps: Int, inset: CGFloat, format: @escaping (Int) -> String, onChange: @escaping (Int) -> Void) {
+    init(_ label: String, steps: Int, least: Int = 1, inset: CGFloat, format: @escaping (Int) -> String,
+         onChange: @escaping (Int) -> Void) {
         self.label = label
+        self.least = least
         self.inset = inset
         self.format = format
         self.onChange = onChange
-        self.steps = min(Self.count, max(1, steps))
+        self.steps = min(Self.count, max(least, steps))
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 31))
         // The menu widens to its widest item; stretch with it so the bar ends at the separators.
         autoresizingMask = .width
@@ -128,126 +140,95 @@ final class StepBarView: NSView {
     private func set(from event: NSEvent) {
         let x = convert(event.locationInWindow, from: nil).x
         let n = Int(((x - bar.minX) / bar.width * CGFloat(Self.count)).rounded(.up))
-        steps = min(Self.count, max(1, n))
+        // Left of the bar's start (drag all the way left) is 0 lit.
+        steps = min(Self.count, max(least, n))
     }
 }
 
-/// Menu header, laid out like Pressure's: the focus / rest gauge on the left with the phase under
-/// it, the time on the right with its name under it; both names on one baseline.
+/// Menu header: two concentric half rings as wide as the separators, the text inside.
 ///
-///     ◜‾‾◝
-///                  26:40
-///     FOCUS         LEFT
+///      ◜‾‾‾‾‾‾‾‾‾‾‾‾◝
+///     ◜     FOCUS      ◝
+///     |     26:40      |
+///     |   EYE 12:34    |
 ///
-/// The gauge is Pressure's (same arc, same thickness), cut into 10 segments, 10 % each. The next
-/// 20-20-20 reminder is secondary: its own row under the header (EyeRowView). Ticks once a second
-/// only while the menu is open (the view exists only then), and only while the clock runs.
+/// Both ends sit flat on the header's bottom line, like Pressure's header. Outer: the focus / rest clock,
+/// 10 segments. Inner: the next 20-20-20 reminder, 20 segments, one a minute; during a rest no
+/// reminder runs, so it stands at full length with an empty ring. Ticks once a second only while
+/// the menu is open (the view exists only then), and only for the countdowns that run.
 final class HeaderView: NSView {
-    enum Left {
+    enum Clock {
         /// A running or paused focus / rest.
-        case clock(caption: String, start: Date, end: Date, pausedLeft: TimeInterval?)
+        case running(caption: String, start: Date, end: Date, pausedLeft: TimeInterval?)
         /// Idle (next focus length) or a finished focus (minutes focused).
-        case still(caption: String, value: NSAttributedString, name: String, fraction: Double)
+        case still(caption: String, value: NSAttributedString, fraction: Double)
     }
 
-    /// Pressure's header: 92 pt tall, gauge box 72 pt square at y 16, names at y 8, value at y 40.
-    private static let gauge: CGFloat = 72, count = 10
-    private let left: Left
-    private let inset: CGFloat
-    private var timer: Timer?
+    /// Outer ring 104 pt radius (16…224 in a 240 pt menu, like the separators), 14 thick; 3 pt gap; inner ring 6 thick.
+    private static let radius: CGFloat = 104, height: CGFloat = 120
+    private let clock: Clock
+    private weak var eyes: EyeBreak?
+    private var timers: [Timer] = []
 
-    init(_ left: Left, inset: CGFloat) {
-        self.left = left
-        self.inset = inset
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 92))
+    init(_ clock: Clock, eyes: EyeBreak?) {
+        self.clock = clock
+        self.eyes = eyes
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: Self.height))
         autoresizingMask = .width
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidMoveToWindow() {
-        timer?.invalidate()
-        timer = nil
-        guard window != nil, case let .clock(_, _, end, nil) = left else { return }
-        timer = Ink.secondTimer(to: end, self)
+        timers.forEach { $0.invalidate() }
+        timers = []
+        guard window != nil else { return }
+        // Each countdown redraws on its own whole seconds.
+        if case let .running(_, _, end, nil) = clock { timers.append(Ink.secondTimer(to: end, self)) }
+        if let due = eyes?.due { timers.append(Ink.secondTimer(to: due, self)) }
     }
 
     /// "38:12".
-    static func clock(_ seconds: TimeInterval) -> NSAttributedString {
+    static func mmss(_ seconds: TimeInterval) -> String {
         let s = Int(max(0, seconds).rounded(.up))
-        return NSAttributedString(string: String(format: "%02d:%02d", s / 60, s % 60), attributes: Ink.mono(20, kern: 0.5))
+        return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+
+    static func clock(_ seconds: TimeInterval) -> NSAttributedString {
+        NSAttributedString(string: mmss(seconds), attributes: Ink.mono(28, kern: 0.5))
     }
 
     /// "38 MIN": the unit small on the number's baseline.
     static func minutes(_ n: String) -> NSAttributedString {
-        let s = NSMutableAttributedString(string: n, attributes: Ink.mono(20, kern: 0.5))
+        let s = NSMutableAttributedString(string: n, attributes: Ink.mono(28, kern: 0.5))
         s.addAttribute(.kern, value: 3, range: NSRange(location: s.length - 1, length: 1))
         s.append(NSAttributedString(string: "MIN", attributes: Ink.mono(11, kern: 1)))
         return s
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let caption: String, value: NSAttributedString, name: String, fraction: Double
-        switch left {
-        case let .clock(c, start, end, pausedLeft):
+        let caption: String, value: NSAttributedString, fraction: Double
+        switch clock {
+        case let .running(c, start, end, pausedLeft):
             let remaining = pausedLeft ?? max(0, end.timeIntervalSinceNow)
             let total = end.timeIntervalSince(start)
-            (caption, value, name, fraction) = (c, Self.clock(remaining), "LEFT", total > 0 ? 1 - remaining / total : 1)
-        case let .still(c, v, n, f):
-            (caption, value, name, fraction) = (c, v, n, f)
+            (caption, value, fraction) = (c, Self.clock(remaining), total > 0 ? 1 - remaining / total : 1)
+        case let .still(c, v, f):
+            (caption, value, fraction) = (c, v, f)
         }
+        let eyeTotal = eyes?.interval ?? 1
+        let eyeLeft = eyes?.due.map { max(0, $0.timeIntervalSinceNow) } ?? eyeTotal
 
-        let x = inset, right = bounds.maxX - Ink.trailing, g = Self.gauge
-        // Pressure's arc in a 16-unit box: center 6 up, outer radius 8, inner 4.6.
-        let u = g / 16
-        let lit = Int((Double(Self.count) * min(1, max(0, fraction))).rounded(.down))
-        Ink.ring(Self.count, lit: lit, center: NSPoint(x: x + g / 2, y: 16 + 6 * u), radius: 8 * u, width: 3.4 * u, gap: 3)
-        // Kern also follows the last glyph; leave it out when centering or right-aligning.
+        let r = Self.radius, c = NSPoint(x: bounds.midX, y: 10)
+        func lit(_ n: Int, _ f: Double) -> Int { Int((Double(n) * min(1, max(0, f))).rounded(.down)) }
+        Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 14, gap: 3, sweep: 180)
+        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: r - 17, width: 6, gap: 2, sweep: 180)
+
+        // Baselines: the eye countdown on the rings' bottom edge, the 28 pt time 22 above, the phase 6 above that.
         let label = Ink.mono(11, kern: 1)
-        let title = NSAttributedString(string: caption, attributes: label)
-        title.draw(at: NSPoint(x: (x + g / 2 - (title.size().width - 1) / 2).rounded(), y: 8))
-        // The value's last glyph sits ½ pt further in than the name's; +1 lines their right edges up.
-        value.draw(at: NSPoint(x: right - value.size().width + 1, y: 40))
-        let n = NSAttributedString(string: name, attributes: label)
-        n.draw(at: NSPoint(x: right - n.size().width + 1, y: 8))
-    }
-}
-
-/// The next 20-20-20 reminder, as a row like the bars below (and Pressure's app rows):
-///
-///     Look Away              12:34
-///     ▬▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-///
-/// 20 segments, one a minute. During a rest no reminder runs: full length, empty bar.
-final class EyeRowView: NSView {
-    private weak var eyes: EyeBreak?
-    private let inset: CGFloat
-    private var timer: Timer?
-
-    init(_ eyes: EyeBreak?, inset: CGFloat) {
-        self.eyes = eyes
-        self.inset = inset
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 31))
-        autoresizingMask = .width
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func viewDidMoveToWindow() {
-        timer?.invalidate()
-        timer = nil
-        guard window != nil, let due = eyes?.due else { return }
-        timer = Ink.secondTimer(to: due, self)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let total = eyes?.interval ?? 1
-        let left = eyes?.due.map { max(0, $0.timeIntervalSinceNow) } ?? total
-        let s = Int(left.rounded(.up))
-        StepBarView.drawText("Look Away", String(format: "%02d:%02d", s / 60, s % 60), inset: inset, in: bounds)
-        let n = 20
-        Ink.segments(n, lit: Int((Double(n) * (1 - left / total)).rounded(.down)),
-                     in: NSRect(x: inset, y: 6, width: bounds.maxX - Ink.trailing - inset, height: 3))
+        Ink.drawCentered(NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label), x: c.x, baseline: c.y)
+        Ink.drawCentered(value, x: c.x, baseline: c.y + 22)
+        Ink.drawCentered(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: c.y + 56)
     }
 }
 
@@ -348,24 +329,20 @@ final class MenuController: NSObject, NSMenuDelegate {
         let loginOn = SMAppService.mainApp.status == .enabled
         let inset: CGFloat = loginOn ? 24 : 16
 
-        let left: HeaderView.Left
+        let clock: HeaderView.Clock
         switch session.phase {
         case .idle:
-            left = .still(caption: "READY", value: HeaderView.clock(settings.focusMinutes * 60), name: "NEXT", fraction: 0)
+            clock = .still(caption: "READY", value: HeaderView.clock(settings.focusMinutes * 60), fraction: 0)
         case .focus, .rest:
             let caption = session.phase == .rest ? "REST" : session.paused ? "PAUSED" : "FOCUS"
-            left = .clock(caption: caption, start: session.start, end: session.end, pausedLeft: session.pausedLeft)
+            clock = .running(caption: caption, start: session.start, end: session.end, pausedLeft: session.pausedLeft)
         case .due:
-            left = .still(caption: "DONE", value: HeaderView.minutes(EndScreen.fmt(session.focusedMinutes)),
-                          name: "FOCUSED", fraction: session.focusedFraction)
+            clock = .still(caption: "DONE", value: HeaderView.minutes(EndScreen.fmt(session.focusedMinutes)),
+                           fraction: session.focusedFraction)
         }
         let header = NSMenuItem()
-        header.view = HeaderView(left, inset: inset)
+        header.view = HeaderView(clock, eyes: host.eyeBreak)
         menu.addItem(header)
-        menu.addItem(.separator())
-        let eyes = NSMenuItem()
-        eyes.view = EyeRowView(host.eyeBreak, inset: inset)
-        menu.addItem(eyes)
         menu.addItem(.separator())
 
         switch session.phase {
@@ -384,7 +361,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         let s = settings
         bar("Focus", steps: Int((s.focusMinutes / 5).rounded()), inset: inset, format: { "\($0 * 5) min" }) { s.focusMinutes = Double($0 * 5) }
         bar("Rest", steps: Int(s.restMinutes.rounded()), inset: inset, format: { "\($0) min" }) { s.restMinutes = Double($0) }
-        bar("Dim", steps: Int((s.dimLevel * 20).rounded()), inset: inset, format: { "\($0 * 5)%" }) { [weak self] in
+        bar("Dim", steps: Int((s.dimLevel * 20).rounded()), least: 0, inset: inset, format: { "\($0 * 5)%" }) { [weak self] in
             self?.host?.setDimLevel(Double($0) / 20)
         }
 
@@ -398,10 +375,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(item("Quit", #selector(quit), key: "q"))
     }
 
-    private func bar(_ label: String, steps: Int, inset: CGFloat, format: @escaping (Int) -> String,
+    private func bar(_ label: String, steps: Int, least: Int = 1, inset: CGFloat, format: @escaping (Int) -> String,
                      onChange: @escaping (Int) -> Void) {
         let it = NSMenuItem()
-        it.view = StepBarView(label, steps: steps, inset: inset, format: format, onChange: onChange)
+        it.view = StepBarView(label, steps: steps, least: least, inset: inset, format: format, onChange: onChange)
         menu.addItem(it)
     }
 

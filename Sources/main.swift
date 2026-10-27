@@ -48,8 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     var axTrusted: Bool { tracker.axTrusted }
 
     func setDimLevel(_ level: Double) {
+        let wasOff = settings.dimLevel == 0
         settings.dimLevel = level
         overlays.setDim(level)
+        if wasOff && level > 0 { tracker.update() } // show the overlays again
     }
 
     func togglePause() { session.togglePause() }
