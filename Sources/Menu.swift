@@ -52,11 +52,12 @@ enum Ink {
         text.draw(at: NSPoint(x: right - text.size().width + kern, y: y))
     }
 
-    /// Draws centered on `x` with its first font's baseline at `baseline`, kern after the last glyph left out.
-    static func drawCentered(_ text: NSAttributedString, x: CGFloat, baseline: CGFloat) {
+    /// Draws with its first font's baseline at `baseline`; `anchor` 0 starts it at `x`, 0.5 centers it, 1 ends it there.
+    /// Kern after the last glyph is left out.
+    static func draw(_ text: NSAttributedString, x: CGFloat, baseline: CGFloat, anchor: CGFloat) {
         let kern = text.attribute(.kern, at: max(0, text.length - 1), effectiveRange: nil) as? CGFloat ?? 0
         let descender = (text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.descender ?? 0
-        text.draw(at: NSPoint(x: (x - (text.size().width - kern) / 2).rounded(), y: baseline + descender))
+        text.draw(at: NSPoint(x: (x - (text.size().width - kern) * anchor).rounded(), y: baseline + descender))
     }
 
     /// Redraws `view` on the whole seconds of a countdown to `end`; .common so it runs while the menu tracks.
@@ -145,10 +146,10 @@ final class StepBarView: NSView {
     }
 }
 
-/// Menu header, laid out like Pressure's: a small two-ring gauge over the phase, the time in large
-/// mono over the eye countdown. Each half of the menu centers its column.
+/// Menu header, laid out like Pressure's: a two-ring gauge over the phase at the left edge, the time in
+/// large mono over the eye countdown at the right edge — like the rows' label left, value right.
 ///
-///      ◜‾◝       26:40
+///     ◜‾‾◝        26:40
 ///     FOCUS    EYE 12:34
 ///
 /// Outer ring: the focus / rest clock, 10 segments. Inner: the next 20-20-20 reminder, 20 segments,
@@ -163,7 +164,7 @@ final class HeaderView: NSView {
         case still(caption: String, value: NSAttributedString, fraction: Double)
     }
 
-    private static let height: CGFloat = 74
+    private static let height: CGFloat = 80
     private let clock: Clock
     /// Where the menu's titles start, so the columns split the same span as the rows.
     private let inset: CGFloat
@@ -221,18 +222,18 @@ final class HeaderView: NSView {
         let eyeLeft = eyes?.due.map { max(0, $0.timeIntervalSinceNow) } ?? eyeTotal
 
         let left = inset, right = bounds.maxX - Ink.trailing
-        let x1 = left + (right - left) / 4, x2 = left + (right - left) * 3 / 4
 
-        let c = NSPoint(x: x1, y: 42)
+        // Same gauge size and place as Pressure's: lower ends 16 above the labels' baseline.
+        let r: CGFloat = 32, c = NSPoint(x: left + r, y: 24 + r / 2)
         func lit(_ n: Int, _ f: Double) -> Int { Int((Double(n) * min(1, max(0, f))).rounded(.down)) }
-        Ink.ring(10, lit: lit(10, fraction), center: c, radius: 26, width: 6, gap: 2)
-        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: 18, width: 3, gap: 1.5)
+        Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 7, gap: 2)
+        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: 22, width: 4, gap: 1.5)
 
-        // Labels share one baseline; the 28 pt time sits beside the gauge.
+        // Labels share one baseline; the 28 pt time is centered on the gauge's height.
         let label = Ink.mono(11, kern: 1)
-        Ink.drawCentered(NSAttributedString(string: caption, attributes: label), x: x1, baseline: 8)
-        Ink.drawCentered(NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label), x: x2, baseline: 8)
-        Ink.drawCentered(value, x: x2, baseline: 36)
+        Ink.draw(NSAttributedString(string: caption, attributes: label), x: left, baseline: 8, anchor: 0)
+        Ink.draw(NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label), x: right, baseline: 8, anchor: 1)
+        Ink.draw(value, x: right, baseline: c.y + r / 4 - 10, anchor: 1)
     }
 }
 
