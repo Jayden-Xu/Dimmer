@@ -99,13 +99,18 @@ final class StepBarView: NSView {
     private var bar: NSRect { NSRect(x: inset, y: 6, width: bounds.maxX - Ink.trailing - inset, height: 3) }
 
     override func draw(_ dirtyRect: NSRect) {
-        let line = Self.labelFont.boundingRectForFont.height
-        let y = ((22 - line) / 2).rounded() + bounds.height - 22
-        (label as NSString).draw(at: NSPoint(x: inset, y: y), withAttributes: [.font: Self.labelFont, .foregroundColor: Ink.text])
-        // Mono value, baseline-matched to the label.
-        let value = NSAttributedString(string: format(steps), attributes: [.font: Self.valueFont, .foregroundColor: Ink.text])
-        Ink.drawRight(value, right: bounds.maxX - Ink.trailing, y: y + Self.labelFont.descender - Self.valueFont.descender)
+        Self.drawText(label, format(steps), inset: inset, in: bounds)
         Ink.segments(Self.count, lit: steps, in: bar)
+    }
+
+    /// Label at the titles' inset, mono value at the right end, both in the top 22 pt of a row.
+    static func drawText(_ label: String, _ value: String, inset: CGFloat, in bounds: NSRect) {
+        let line = labelFont.boundingRectForFont.height
+        let y = ((22 - line) / 2).rounded() + bounds.height - 22
+        (label as NSString).draw(at: NSPoint(x: inset, y: y), withAttributes: [.font: labelFont, .foregroundColor: Ink.text])
+        // Mono value, baseline-matched to the label.
+        let value = NSAttributedString(string: value, attributes: [.font: valueFont, .foregroundColor: Ink.text])
+        Ink.drawRight(value, right: bounds.maxX - Ink.trailing, y: y + labelFont.descender - valueFont.descender)
     }
 
     // Own tracking loop: follows the drag even when the pointer leaves the row.
@@ -127,48 +132,44 @@ final class StepBarView: NSView {
     }
 }
 
-/// Menu header, two ring gauges like Pressure's: the focus / rest on the left, the next 20-20-20
-/// reminder on the right. The time sits inside the ring, the caption in its opening.
+/// Menu header, laid out like Pressure's: the focus / rest gauge on the left with the phase under
+/// it, the time on the right with its name under it; both names on one baseline.
 ///
-///      ◜‾‾‾‾◝          ◜‾‾‾‾◝
-///     ( 38:12 )       ( 12:34 )
-///       FOCUS         LOOK AWAY
+///     ◜‾‾◝
+///                  26:40
+///     FOCUS         LEFT
 ///
-/// 20 segments each (one a minute on the reminder). Ticks once a second only while the menu is
-/// open (the view exists only then), and only for a clock that runs. A stopped clock shows its
-/// full length (idle: the next focus; rest: no reminder runs).
+/// The gauge is Pressure's (same arc, same thickness), cut into 10 segments, 10 % each. The next
+/// 20-20-20 reminder is secondary: its own row under the header (EyeRowView). Ticks once a second
+/// only while the menu is open (the view exists only then), and only while the clock runs.
 final class HeaderView: NSView {
     enum Left {
         /// A running or paused focus / rest.
         case clock(caption: String, start: Date, end: Date, pausedLeft: TimeInterval?)
         /// Idle (next focus length) or a finished focus (minutes focused).
-        case still(caption: String, value: NSAttributedString, fraction: Double)
+        case still(caption: String, value: NSAttributedString, name: String, fraction: Double)
     }
 
-    private static let size: CGFloat = 92, thickness: CGFloat = 5, count = 20
-    private static let valueFont = NSFont.monospacedSystemFont(ofSize: 20, weight: .medium)
-    private static let captionFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+    /// Pressure's header: 92 pt tall, gauge box 72 pt square at y 16, names at y 8, value at y 40.
+    private static let gauge: CGFloat = 72, count = 10
     private let left: Left
-    private weak var eyes: EyeBreak?
     private let inset: CGFloat
-    private var timers: [Timer] = []
+    private var timer: Timer?
 
-    init(_ left: Left, eyes: EyeBreak?, inset: CGFloat) {
+    init(_ left: Left, inset: CGFloat) {
         self.left = left
-        self.eyes = eyes
         self.inset = inset
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: Self.size + 2))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 92))
         autoresizingMask = .width
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidMoveToWindow() {
-        timers.forEach { $0.invalidate() }
-        timers = []
-        guard window != nil else { return }
-        if case let .clock(_, _, end, nil) = left { timers.append(Ink.secondTimer(to: end, self)) }
-        if let due = eyes?.due { timers.append(Ink.secondTimer(to: due, self)) }
+        timer?.invalidate()
+        timer = nil
+        guard window != nil, case let .clock(_, _, end, nil) = left else { return }
+        timer = Ink.secondTimer(to: end, self)
     }
 
     /// "38:12".
@@ -186,39 +187,67 @@ final class HeaderView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let caption: String, value: NSAttributedString, fraction: Double
+        let caption: String, value: NSAttributedString, name: String, fraction: Double
         switch left {
         case let .clock(c, start, end, pausedLeft):
             let remaining = pausedLeft ?? max(0, end.timeIntervalSinceNow)
             let total = end.timeIntervalSince(start)
-            (caption, value, fraction) = (c, Self.clock(remaining), total > 0 ? 1 - remaining / total : 1)
-        case let .still(c, v, f):
-            (caption, value, fraction) = (c, v, f)
+            (caption, value, name, fraction) = (c, Self.clock(remaining), "LEFT", total > 0 ? 1 - remaining / total : 1)
+        case let .still(c, v, n, f):
+            (caption, value, name, fraction) = (c, v, n, f)
         }
-        let eyeTotal = eyes?.interval ?? 1
-        let eyeLeft = eyes?.due.map { max(0, $0.timeIntervalSinceNow) } ?? eyeTotal
 
-        // Left ring starts at the titles' inset, right ring ends at the separators' end.
-        let d = Self.size, cy = bounds.maxY - 8 - d / 2
-        gauge(center: NSPoint(x: inset + d / 2, y: cy), caption: caption, value: value, fraction: fraction)
-        gauge(center: NSPoint(x: bounds.maxX - Ink.trailing - d / 2, y: cy), caption: "LOOK AWAY",
-              value: Self.clock(eyeLeft), fraction: 1 - eyeLeft / eyeTotal)
+        let x = inset, right = bounds.maxX - Ink.trailing, g = Self.gauge
+        // Pressure's arc in a 16-unit box: center 6 up, outer radius 8, inner 4.6.
+        let u = g / 16
+        let lit = Int((Double(Self.count) * min(1, max(0, fraction))).rounded(.down))
+        Ink.ring(Self.count, lit: lit, center: NSPoint(x: x + g / 2, y: 16 + 6 * u), radius: 8 * u, width: 3.4 * u, gap: 3)
+        // Kern also follows the last glyph; leave it out when centering or right-aligning.
+        let label = Ink.mono(11, kern: 1)
+        let title = NSAttributedString(string: caption, attributes: label)
+        title.draw(at: NSPoint(x: (x + g / 2 - (title.size().width - 1) / 2).rounded(), y: 8))
+        // The value's last glyph sits ½ pt further in than the name's; +1 lines their right edges up.
+        value.draw(at: NSPoint(x: right - value.size().width + 1, y: 40))
+        let n = NSAttributedString(string: name, attributes: label)
+        n.draw(at: NSPoint(x: right - n.size().width + 1, y: 8))
+    }
+}
+
+/// The next 20-20-20 reminder, as a row like the bars below (and Pressure's app rows):
+///
+///     Look Away              12:34
+///     ▬▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+///
+/// 20 segments, one a minute. During a rest no reminder runs: full length, empty bar.
+final class EyeRowView: NSView {
+    private weak var eyes: EyeBreak?
+    private let inset: CGFloat
+    private var timer: Timer?
+
+    init(_ eyes: EyeBreak?, inset: CGFloat) {
+        self.eyes = eyes
+        self.inset = inset
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 31))
+        autoresizingMask = .width
     }
 
-    private func gauge(center c: NSPoint, caption: String, value: NSAttributedString, fraction: Double) {
-        let r = Self.size / 2
-        let lit = Int((Double(Self.count) * min(1, max(0, fraction))).rounded(.down))
-        Ink.ring(Self.count, lit: lit, center: c, radius: r, width: Self.thickness)
-        // Kern also follows the last glyph; leave it out when centering.
-        func centered(_ s: NSAttributedString, capMiddle y: CGFloat, font: NSFont) {
-            let kern = s.attribute(.kern, at: max(0, s.length - 1), effectiveRange: nil) as? CGFloat ?? 0
-            s.draw(at: NSPoint(x: (c.x - (s.size().width - kern) / 2).rounded(),
-                               y: (y - font.capHeight / 2 + font.descender).rounded()))
-        }
-        centered(value, capMiddle: c.y + 2, font: Self.valueFont)
-        // In the opening, level with the arc's ends.
-        centered(NSAttributedString(string: caption, attributes: Ink.mono(11, kern: 1)),
-                 capMiddle: c.y - r * 0.5 - 4, font: Self.captionFont)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        timer?.invalidate()
+        timer = nil
+        guard window != nil, let due = eyes?.due else { return }
+        timer = Ink.secondTimer(to: due, self)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let total = eyes?.interval ?? 1
+        let left = eyes?.due.map { max(0, $0.timeIntervalSinceNow) } ?? total
+        let s = Int(left.rounded(.up))
+        StepBarView.drawText("Look Away", String(format: "%02d:%02d", s / 60, s % 60), inset: inset, in: bounds)
+        let n = 20
+        Ink.segments(n, lit: Int((Double(n) * (1 - left / total)).rounded(.down)),
+                     in: NSRect(x: inset, y: 6, width: bounds.maxX - Ink.trailing - inset, height: 3))
     }
 }
 
@@ -322,17 +351,21 @@ final class MenuController: NSObject, NSMenuDelegate {
         let left: HeaderView.Left
         switch session.phase {
         case .idle:
-            left = .still(caption: "READY", value: HeaderView.clock(settings.focusMinutes * 60), fraction: 0)
+            left = .still(caption: "READY", value: HeaderView.clock(settings.focusMinutes * 60), name: "NEXT", fraction: 0)
         case .focus, .rest:
             let caption = session.phase == .rest ? "REST" : session.paused ? "PAUSED" : "FOCUS"
             left = .clock(caption: caption, start: session.start, end: session.end, pausedLeft: session.pausedLeft)
         case .due:
-            left = .still(caption: "FOCUSED", value: HeaderView.minutes(EndScreen.fmt(session.focusedMinutes)),
-                          fraction: session.focusedFraction)
+            left = .still(caption: "DONE", value: HeaderView.minutes(EndScreen.fmt(session.focusedMinutes)),
+                          name: "FOCUSED", fraction: session.focusedFraction)
         }
         let header = NSMenuItem()
-        header.view = HeaderView(left, eyes: host.eyeBreak, inset: inset)
+        header.view = HeaderView(left, inset: inset)
         menu.addItem(header)
+        menu.addItem(.separator())
+        let eyes = NSMenuItem()
+        eyes.view = EyeRowView(host.eyeBreak, inset: inset)
+        menu.addItem(eyes)
         menu.addItem(.separator())
 
         switch session.phase {
