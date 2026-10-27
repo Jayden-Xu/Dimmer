@@ -8,9 +8,11 @@ import AppKit
 /// without input. Nothing runs in between.
 @MainActor
 final class EyeBreak {
-    private let interval: TimeInterval
+    let interval: TimeInterval
     private let onDue: () -> Void
     private var timer: DispatchSourceTimer?
+    /// When the next reminder is due (for the menu); nil while away.
+    private(set) var due: Date?
     /// Why the screen is not being looked at right now; the timer runs only while empty.
     private var away: Set<String> = []
     /// No input for this long counts as a break already taken.
@@ -54,11 +56,14 @@ final class EyeBreak {
         t.schedule(deadline: .now() + interval, leeway: .seconds(5))
         t.resume()
         timer = t
+        // Wall clock is fine here: sleep cancels and re-arms, so the two clocks never drift apart.
+        due = Date() + interval
     }
 
     private func cancel() {
         timer?.cancel()
         timer = nil
+        due = nil
     }
 
     private func fire() {

@@ -34,6 +34,17 @@ enum Ink {
         text.draw(at: NSPoint(x: right - text.size().width + kern, y: y))
     }
 
+    /// Redraws `view` on the whole seconds of a countdown to `end`; .common so it runs while the menu tracks.
+    static func secondTimer(to end: Date, _ view: NSView) -> Timer {
+        let first = Date() + end.timeIntervalSinceNow.truncatingRemainder(dividingBy: 1) + 0.01
+        let t = Timer(fire: first, interval: 1, repeats: true) { [weak view] _ in
+            MainActor.assumeIsolated { view?.needsDisplay = true }
+        }
+        t.tolerance = 0.05
+        RunLoop.main.add(t, forMode: .common)
+        return t
+    }
+
     /// "40 MIN": the number at the countdown's size, the unit small on its baseline.
     static func minutes(_ n: String) -> NSAttributedString {
         let s = NSMutableAttributedString(string: n, attributes: mono(24, kern: 0.5))
@@ -153,14 +164,7 @@ final class TimerItemView: NSView {
         timer?.invalidate()
         timer = nil
         guard window != nil, pausedLeft == nil else { return }
-        // Fire on the countdown's whole seconds; .common so it runs while the menu tracks.
-        let first = Date() + end.timeIntervalSinceNow.truncatingRemainder(dividingBy: 1) + 0.01
-        let t = Timer(fire: first, interval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.needsDisplay = true }
-        }
-        t.tolerance = 0.05
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
+        timer = Ink.secondTimer(to: end, self)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -169,6 +173,52 @@ final class TimerItemView: NSView {
         let secs = Int(left.rounded(.up))
         let time = NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60), attributes: Ink.mono(24, kern: 0.5))
         Ink.readout(caption: caption, value: time, fraction: total > 0 ? 1 - left / total : 1, in: bounds, inset: inset)
+    }
+}
+
+/// Time to the next 20-20-20 reminder, under the phase header. Same 20 columns as the header's
+/// bar, one segment a minute. Reads EyeBreak's deadline, so it follows a reminder that fires
+/// while the menu is open; ticks only while the menu is open.
+///
+///     LOOK AWAY            12:34
+///     ▬▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+final class EyeItemView: NSView {
+    private static let captionFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+    private static let valueFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+    private weak var eyes: EyeBreak?
+    private let inset: CGFloat
+    private var timer: Timer?
+
+    init(_ eyes: EyeBreak, inset: CGFloat) {
+        self.eyes = eyes
+        self.inset = inset
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 31))
+        autoresizingMask = .width
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        timer?.invalidate()
+        timer = nil
+        guard window != nil, let due = eyes?.due else { return }
+        timer = Ink.secondTimer(to: due, self)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let eyes, let due = eyes.due else { return }
+        let left = max(0, due.timeIntervalSinceNow)
+        let secs = Int(left.rounded(.up))
+        let right = bounds.maxX - Ink.trailing
+        // Caption and value on one baseline, caps centered in the top 22 pt like the bar rows.
+        let base = (bounds.height - 11 - Self.valueFont.capHeight / 2).rounded()
+        NSAttributedString(string: "LOOK AWAY", attributes: Ink.mono(11, kern: 1))
+            .draw(at: NSPoint(x: inset, y: base + Self.captionFont.descender))
+        let value = NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60), attributes: Ink.mono(12))
+        Ink.drawRight(value, right: right, y: base + Self.valueFont.descender)
+        let n = 20
+        let lit = Int((Double(n) * min(1, max(0, 1 - left / eyes.interval))).rounded(.down))
+        Ink.segments(n, lit: lit, in: NSRect(x: inset, y: 6, width: right - inset, height: 3))
     }
 }
 
@@ -200,6 +250,7 @@ protocol MenuHost: AnyObject {
     var axTrusted: Bool { get }
     var session: Session { get }
     var focusHotKey: HotKey.Combo? { get }
+    var eyeBreak: EyeBreak! { get }
     func setDimLevel(_ level: Double)
     func next()
     func togglePause()
@@ -290,8 +341,19 @@ final class MenuController: NSObject, NSMenuDelegate {
         let loginOn = SMAppService.mainApp.status == .enabled
         let inset: CGFloat = loginOn ? 24 : 16
 
+        // Readouts first (phase, then the 20-20-20 countdown), then the actions.
+        // No row while there is no deadline (a rest is running).
+        @discardableResult func eyeRow() -> Bool {
+            guard let eyes = host.eyeBreak, eyes.due != nil else { return false }
+            let it = NSMenuItem()
+            it.view = EyeItemView(eyes, inset: inset)
+            menu.addItem(it)
+            return true
+        }
+
         switch session.phase {
         case .idle:
+            if eyeRow() { menu.addItem(.separator()) }
             menu.addItem(withHotKey(item("Start Focus", #selector(next)), host.focusHotKey))
         case .focus, .rest:
             let focus = session.phase == .focus
@@ -300,6 +362,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             clock.view = TimerItemView(caption: caption, start: session.start, end: session.end,
                                        pausedLeft: session.pausedLeft, inset: inset)
             menu.addItem(clock)
+            eyeRow()
             menu.addItem(.separator())
             if focus { menu.addItem(item(session.paused ? "Resume" : "Pause", #selector(togglePause))) }
             menu.addItem(withHotKey(item(focus ? "End Focus" : "End Rest", #selector(next)), host.focusHotKey))
@@ -307,6 +370,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             let header = NSMenuItem()
             header.view = FocusedItemView(minutes: session.focusedMinutes, fraction: session.focusedFraction, inset: inset)
             menu.addItem(header)
+            eyeRow()
             menu.addItem(.separator())
             menu.addItem(withHotKey(item("Start Rest", #selector(next)), host.focusHotKey))
         }

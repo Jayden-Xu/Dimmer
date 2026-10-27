@@ -8,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     private var menu: MenuController!
     private let hotKeys = HotKey()
     private let endScreen = EndScreen()
-    private var eyeBreak: EyeBreak!
+    private(set) var eyeBreak: EyeBreak!
     let session = Session()
     private(set) var focusHotKey: HotKey.Combo?
 
