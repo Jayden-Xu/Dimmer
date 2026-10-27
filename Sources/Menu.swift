@@ -145,16 +145,15 @@ final class StepBarView: NSView {
     }
 }
 
-/// Menu header: two concentric half rings as wide as the separators, the text inside.
+/// Menu header, laid out like Pressure's: a small two-ring gauge over the phase, the time in large
+/// mono over the eye countdown. Each half of the menu centers its column.
 ///
-///      ◜‾‾‾‾‾‾‾‾‾‾‾‾◝
-///     ◜     FOCUS      ◝
-///     |     26:40      |
-///     |   EYE 12:34    |
+///      ◜‾◝       26:40
+///     FOCUS    EYE 12:34
 ///
-/// Both ends sit flat on the header's bottom line, like Pressure's header. Outer: the focus / rest clock,
-/// 10 segments. Inner: the next 20-20-20 reminder, 20 segments, one a minute; during a rest no
-/// reminder runs, so it stands at full length with an empty ring. Ticks once a second only while
+/// Outer ring: the focus / rest clock, 10 segments. Inner: the next 20-20-20 reminder, 20 segments,
+/// one a minute; during a rest no reminder runs, so it stands at full length with an empty ring.
+/// Both rings span 240°, open at the bottom, like the menu bar gauge. Ticks once a second only while
 /// the menu is open (the view exists only then), and only for the countdowns that run.
 final class HeaderView: NSView {
     enum Clock {
@@ -164,14 +163,16 @@ final class HeaderView: NSView {
         case still(caption: String, value: NSAttributedString, fraction: Double)
     }
 
-    /// Outer ring 94 pt radius (16…204 in a 220 pt menu, like the separators), 12 thick; 3 pt gap; inner ring 6 thick.
-    private static let radius: CGFloat = 94, height: CGFloat = 110
+    private static let height: CGFloat = 74
     private let clock: Clock
+    /// Where the menu's titles start, so the columns split the same span as the rows.
+    private let inset: CGFloat
     private weak var eyes: EyeBreak?
     private var timers: [Timer] = []
 
-    init(_ clock: Clock, eyes: EyeBreak?) {
+    init(_ clock: Clock, eyes: EyeBreak?, inset: CGFloat) {
         self.clock = clock
+        self.inset = inset
         self.eyes = eyes
         super.init(frame: NSRect(x: 0, y: 0, width: 220, height: Self.height))
         autoresizingMask = .width
@@ -219,16 +220,19 @@ final class HeaderView: NSView {
         let eyeTotal = eyes?.interval ?? 1
         let eyeLeft = eyes?.due.map { max(0, $0.timeIntervalSinceNow) } ?? eyeTotal
 
-        let r = Self.radius, c = NSPoint(x: bounds.midX, y: 10)
-        func lit(_ n: Int, _ f: Double) -> Int { Int((Double(n) * min(1, max(0, f))).rounded(.down)) }
-        Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 12, gap: 3, sweep: 180)
-        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: r - 15, width: 6, gap: 2, sweep: 180)
+        let left = inset, right = bounds.maxX - Ink.trailing
+        let x1 = left + (right - left) / 4, x2 = left + (right - left) * 3 / 4
 
-        // Baselines: the eye countdown on the rings' bottom edge, the 28 pt time 22 above, the phase 4 above that.
+        let c = NSPoint(x: x1, y: 42)
+        func lit(_ n: Int, _ f: Double) -> Int { Int((Double(n) * min(1, max(0, f))).rounded(.down)) }
+        Ink.ring(10, lit: lit(10, fraction), center: c, radius: 26, width: 6, gap: 2)
+        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: 18, width: 3, gap: 1.5)
+
+        // Labels share one baseline; the 28 pt time sits beside the gauge.
         let label = Ink.mono(11, kern: 1)
-        Ink.drawCentered(NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label), x: c.x, baseline: c.y)
-        Ink.drawCentered(value, x: c.x, baseline: c.y + 22)
-        Ink.drawCentered(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: c.y + 54)
+        Ink.drawCentered(NSAttributedString(string: caption, attributes: label), x: x1, baseline: 8)
+        Ink.drawCentered(NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label), x: x2, baseline: 8)
+        Ink.drawCentered(value, x: x2, baseline: 36)
     }
 }
 
@@ -341,7 +345,7 @@ final class MenuController: NSObject, NSMenuDelegate {
                            fraction: session.focusedFraction)
         }
         let header = NSMenuItem()
-        header.view = HeaderView(clock, eyes: host.eyeBreak)
+        header.view = HeaderView(clock, eyes: host.eyeBreak, inset: inset)
         menu.addItem(header)
         menu.addItem(.separator())
 
