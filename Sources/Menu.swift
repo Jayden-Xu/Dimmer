@@ -28,6 +28,23 @@ enum Ink {
         }
     }
 
+    /// `n` segments around a 240° arc open at the bottom, like Pressure's gauge, lit clockwise from
+    /// the lower left. Square-cut: each gap is `gap` wide across the ring, not a fixed angle.
+    static func ring(_ n: Int, lit: Int, center c: NSPoint, radius r: CGFloat, width w: CGFloat, gap: CGFloat = 2) {
+        let sweep: CGFloat = 240, start: CGFloat = 210
+        let gapDeg = gap / (r - w / 2) * 180 / .pi
+        let seg = (sweep - CGFloat(n - 1) * gapDeg) / CGFloat(n)
+        for i in 0..<n {
+            let a0 = start - CGFloat(i) * (seg + gapDeg), a1 = a0 - seg
+            let p = NSBezierPath()
+            p.appendArc(withCenter: c, radius: r, startAngle: a0, endAngle: a1, clockwise: true)
+            p.appendArc(withCenter: c, radius: r - w, startAngle: a1, endAngle: a0, clockwise: false)
+            p.close()
+            (i < lit ? Self.lit : unlit).setFill()
+            p.fill()
+        }
+    }
+
     /// Draws right-aligned at `right`. Kern also follows the last glyph; leave it out so the text ends flush.
     static func drawRight(_ text: NSAttributedString, right: CGFloat, y: CGFloat) {
         let kern = text.attribute(.kern, at: max(0, text.length - 1), effectiveRange: nil) as? CGFloat ?? 0
@@ -43,14 +60,6 @@ enum Ink {
         t.tolerance = 0.05
         RunLoop.main.add(t, forMode: .common)
         return t
-    }
-
-    /// "40 MIN": the number at the countdown's size, the unit small on its baseline.
-    static func minutes(_ n: String) -> NSAttributedString {
-        let s = NSMutableAttributedString(string: n, attributes: mono(24, kern: 0.5))
-        s.addAttribute(.kern, value: 4, range: NSRange(location: s.length - 1, length: 1))
-        s.append(NSAttributedString(string: "MIN", attributes: mono(11, kern: 1)))
-        return s
     }
 }
 
@@ -118,16 +127,16 @@ final class StepBarView: NSView {
     }
 }
 
-/// Menu header, two countdowns side by side like Pressure's header: the focus / rest on the
-/// left, the next 20-20-20 reminder on the right; captions on one baseline, a bar under each.
+/// Menu header, two ring gauges like Pressure's: the focus / rest on the left, the next 20-20-20
+/// reminder on the right. The time sits inside the ring, the caption in its opening.
 ///
-///     38:12              12:34
-///     FOCUS          LOOK AWAY
-///     ▬▬▬▬ ─ ─ ─ ─ ─   ▬▬▬ ─ ─ ─ ─ ─ ─
+///      ◜‾‾‾‾◝          ◜‾‾‾‾◝
+///     ( 38:12 )       ( 12:34 )
+///       FOCUS         LOOK AWAY
 ///
-/// Bars sit on the old 20-column grid with a blank column between: 10 segments each.
-/// Ticks once a second only while the menu is open (the view exists only then), and only for
-/// a clock that runs. A stopped clock shows its full length (idle: next focus; rest: no reminder).
+/// 20 segments each (one a minute on the reminder). Ticks once a second only while the menu is
+/// open (the view exists only then), and only for a clock that runs. A stopped clock shows its
+/// full length (idle: the next focus; rest: no reminder runs).
 final class HeaderView: NSView {
     enum Left {
         /// A running or paused focus / rest.
@@ -136,7 +145,8 @@ final class HeaderView: NSView {
         case still(caption: String, value: NSAttributedString, fraction: Double)
     }
 
-    private static let valueFont = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
+    private static let size: CGFloat = 92, thickness: CGFloat = 5, count = 20
+    private static let valueFont = NSFont.monospacedSystemFont(ofSize: 20, weight: .medium)
     private static let captionFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
     private let left: Left
     private weak var eyes: EyeBreak?
@@ -147,7 +157,7 @@ final class HeaderView: NSView {
         self.left = left
         self.eyes = eyes
         self.inset = inset
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 72))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: Self.size + 2))
         autoresizingMask = .width
     }
 
@@ -161,15 +171,21 @@ final class HeaderView: NSView {
         if let due = eyes?.due { timers.append(Ink.secondTimer(to: due, self)) }
     }
 
+    /// "38:12".
     static func clock(_ seconds: TimeInterval) -> NSAttributedString {
         let s = Int(max(0, seconds).rounded(.up))
-        return NSAttributedString(string: String(format: "%02d:%02d", s / 60, s % 60), attributes: Ink.mono(24, kern: 0.5))
+        return NSAttributedString(string: String(format: "%02d:%02d", s / 60, s % 60), attributes: Ink.mono(20, kern: 0.5))
+    }
+
+    /// "38 MIN": the unit small on the number's baseline.
+    static func minutes(_ n: String) -> NSAttributedString {
+        let s = NSMutableAttributedString(string: n, attributes: Ink.mono(20, kern: 0.5))
+        s.addAttribute(.kern, value: 3, range: NSRange(location: s.length - 1, length: 1))
+        s.append(NSAttributedString(string: "MIN", attributes: Ink.mono(11, kern: 1)))
+        return s
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let x = inset, right = bounds.maxX - Ink.trailing
-        let valueY: CGFloat = 36, captionY: CGFloat = 20, barY: CGFloat = 8
-
         let caption: String, value: NSAttributedString, fraction: Double
         switch left {
         case let .clock(c, start, end, pausedLeft):
@@ -179,20 +195,30 @@ final class HeaderView: NSView {
         case let .still(c, v, f):
             (caption, value, fraction) = (c, v, f)
         }
-
-        let eyeLeft = eyes.flatMap { e in e.due.map { $0.timeIntervalSinceNow } } ?? eyes?.interval ?? 0
         let eyeTotal = eyes?.interval ?? 1
+        let eyeLeft = eyes?.due.map { max(0, $0.timeIntervalSinceNow) } ?? eyeTotal
 
-        value.draw(at: NSPoint(x: x, y: valueY))
-        NSAttributedString(string: caption, attributes: Ink.mono(11, kern: 1)).draw(at: NSPoint(x: x, y: captionY))
-        Ink.drawRight(Self.clock(eyeLeft), right: right, y: valueY)
-        Ink.drawRight(NSAttributedString(string: "LOOK AWAY", attributes: Ink.mono(11, kern: 1)), right: right, y: captionY)
+        // Left ring starts at the titles' inset, right ring ends at the separators' end.
+        let d = Self.size, cy = bounds.maxY - 8 - d / 2
+        gauge(center: NSPoint(x: inset + d / 2, y: cy), caption: caption, value: value, fraction: fraction)
+        gauge(center: NSPoint(x: bounds.maxX - Ink.trailing - d / 2, y: cy), caption: "LOOK AWAY",
+              value: Self.clock(eyeLeft), fraction: 1 - eyeLeft / eyeTotal)
+    }
 
-        // 21 columns: 10 | blank | 10. Thicker than the 3 pt setting bars: these are readouts.
-        let gap: CGFloat = 2, step = (right - x + gap) / 21, half = 10 * step - gap
-        func lit(_ f: Double) -> Int { Int((10 * min(1, max(0, f))).rounded(.down)) }
-        Ink.segments(10, lit: lit(fraction), in: NSRect(x: x, y: barY, width: half, height: 5))
-        Ink.segments(10, lit: lit(1 - eyeLeft / eyeTotal), in: NSRect(x: right - half, y: barY, width: half, height: 5))
+    private func gauge(center c: NSPoint, caption: String, value: NSAttributedString, fraction: Double) {
+        let r = Self.size / 2
+        let lit = Int((Double(Self.count) * min(1, max(0, fraction))).rounded(.down))
+        Ink.ring(Self.count, lit: lit, center: c, radius: r, width: Self.thickness)
+        // Kern also follows the last glyph; leave it out when centering.
+        func centered(_ s: NSAttributedString, capMiddle y: CGFloat, font: NSFont) {
+            let kern = s.attribute(.kern, at: max(0, s.length - 1), effectiveRange: nil) as? CGFloat ?? 0
+            s.draw(at: NSPoint(x: (c.x - (s.size().width - kern) / 2).rounded(),
+                               y: (y - font.capHeight / 2 + font.descender).rounded()))
+        }
+        centered(value, capMiddle: c.y + 2, font: Self.valueFont)
+        // In the opening, level with the arc's ends.
+        centered(NSAttributedString(string: caption, attributes: Ink.mono(11, kern: 1)),
+                 capMiddle: c.y - r * 0.5 - 4, font: Self.captionFont)
     }
 }
 
@@ -301,7 +327,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             let caption = session.phase == .rest ? "REST" : session.paused ? "PAUSED" : "FOCUS"
             left = .clock(caption: caption, start: session.start, end: session.end, pausedLeft: session.pausedLeft)
         case .due:
-            left = .still(caption: "FOCUSED", value: Ink.minutes(EndScreen.fmt(session.focusedMinutes)),
+            left = .still(caption: "FOCUSED", value: HeaderView.minutes(EndScreen.fmt(session.focusedMinutes)),
                           fraction: session.focusedFraction)
         }
         let header = NSMenuItem()
