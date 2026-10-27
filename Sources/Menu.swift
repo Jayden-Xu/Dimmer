@@ -52,12 +52,15 @@ enum Ink {
         text.draw(at: NSPoint(x: right - text.size().width + kern, y: y))
     }
 
+    /// Ink width: kern also follows the last glyph; leave it out.
+    static func width(_ text: NSAttributedString) -> CGFloat {
+        text.size().width - (text.attribute(.kern, at: max(0, text.length - 1), effectiveRange: nil) as? CGFloat ?? 0)
+    }
+
     /// Draws with its first font's baseline at `baseline`; `anchor` 0 starts it at `x`, 0.5 centers it, 1 ends it there.
-    /// Kern after the last glyph is left out.
     static func draw(_ text: NSAttributedString, x: CGFloat, baseline: CGFloat, anchor: CGFloat) {
-        let kern = text.attribute(.kern, at: max(0, text.length - 1), effectiveRange: nil) as? CGFloat ?? 0
         let descender = (text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.descender ?? 0
-        text.draw(at: NSPoint(x: (x - (text.size().width - kern) * anchor).rounded(), y: baseline + descender))
+        text.draw(at: NSPoint(x: (x - width(text) * anchor).rounded(), y: baseline + descender))
     }
 
     /// Redraws `view` on the whole seconds of a countdown to `end`; .common so it runs while the menu tracks.
@@ -229,11 +232,14 @@ final class HeaderView: NSView {
         Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 7, gap: 2)
         Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: 22, width: 4, gap: 1.5)
 
-        // Labels share one baseline; the 28 pt time is centered on the gauge's height.
+        // Each label centered under its gauge or time; labels share one baseline.
+        // The 28 pt time is centered on the gauge's height; its column ends at the separators.
         let label = Ink.mono(11, kern: 1)
-        Ink.draw(NSAttributedString(string: caption, attributes: label), x: left, baseline: 8, anchor: 0)
-        Ink.draw(NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label), x: right, baseline: 8, anchor: 1)
-        Ink.draw(value, x: right, baseline: c.y + r / 4 - 10, anchor: 1)
+        let eye = NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label)
+        let x2 = right - max(Ink.width(value), Ink.width(eye)) / 2
+        Ink.draw(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: 8, anchor: 0.5)
+        Ink.draw(eye, x: x2, baseline: 8, anchor: 0.5)
+        Ink.draw(value, x: x2, baseline: c.y + r / 4 - 10, anchor: 0.5)
     }
 }
 
