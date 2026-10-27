@@ -6,6 +6,8 @@ import ServiceManagement
 @MainActor
 enum Ink {
     static let text = NSColor.labelColor
+    /// Menu width, the same as Pressure's.
+    static let menuWidth: CGFloat = 230
     static let lit = NSColor.labelColor.withAlphaComponent(0.5)
     static let unlit = NSColor.labelColor.withAlphaComponent(0.125)
     /// Separators end this far from the right edge; values and bars end there too.
@@ -105,7 +107,7 @@ final class StepBarView: NSView {
         self.format = format
         self.onChange = onChange
         self.steps = min(Self.count, max(least, steps))
-        super.init(frame: NSRect(x: 0, y: 0, width: 220, height: 31))
+        super.init(frame: NSRect(x: 0, y: 0, width: Ink.menuWidth, height: 31))
         // The menu widens to its widest item; stretch with it so the bar ends at the separators.
         autoresizingMask = .width
     }
@@ -178,7 +180,7 @@ final class HeaderView: NSView {
         self.clock = clock
         self.inset = inset
         self.eyes = eyes
-        super.init(frame: NSRect(x: 0, y: 0, width: 220, height: Self.height))
+        super.init(frame: NSRect(x: 0, y: 0, width: Ink.menuWidth, height: Self.height))
         autoresizingMask = .width
     }
 
