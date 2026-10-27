@@ -101,7 +101,7 @@ final class StepBarView: NSView {
         self.format = format
         self.onChange = onChange
         self.steps = min(Self.count, max(least, steps))
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 31))
+        super.init(frame: NSRect(x: 0, y: 0, width: 220, height: 31))
         // The menu widens to its widest item; stretch with it so the bar ends at the separators.
         autoresizingMask = .width
     }
@@ -164,8 +164,8 @@ final class HeaderView: NSView {
         case still(caption: String, value: NSAttributedString, fraction: Double)
     }
 
-    /// Outer ring 104 pt radius (16…224 in a 240 pt menu, like the separators), 14 thick; 3 pt gap; inner ring 6 thick.
-    private static let radius: CGFloat = 104, height: CGFloat = 120
+    /// Outer ring 94 pt radius (16…204 in a 220 pt menu, like the separators), 12 thick; 3 pt gap; inner ring 6 thick.
+    private static let radius: CGFloat = 94, height: CGFloat = 110
     private let clock: Clock
     private weak var eyes: EyeBreak?
     private var timers: [Timer] = []
@@ -173,7 +173,7 @@ final class HeaderView: NSView {
     init(_ clock: Clock, eyes: EyeBreak?) {
         self.clock = clock
         self.eyes = eyes
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: Self.height))
+        super.init(frame: NSRect(x: 0, y: 0, width: 220, height: Self.height))
         autoresizingMask = .width
     }
 
@@ -221,14 +221,14 @@ final class HeaderView: NSView {
 
         let r = Self.radius, c = NSPoint(x: bounds.midX, y: 10)
         func lit(_ n: Int, _ f: Double) -> Int { Int((Double(n) * min(1, max(0, f))).rounded(.down)) }
-        Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 14, gap: 3, sweep: 180)
-        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: r - 17, width: 6, gap: 2, sweep: 180)
+        Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 12, gap: 3, sweep: 180)
+        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: r - 15, width: 6, gap: 2, sweep: 180)
 
-        // Baselines: the eye countdown on the rings' bottom edge, the 28 pt time 22 above, the phase 6 above that.
+        // Baselines: the eye countdown on the rings' bottom edge, the 28 pt time 22 above, the phase 4 above that.
         let label = Ink.mono(11, kern: 1)
         Ink.drawCentered(NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label), x: c.x, baseline: c.y)
         Ink.drawCentered(value, x: c.x, baseline: c.y + 22)
-        Ink.drawCentered(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: c.y + 56)
+        Ink.drawCentered(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: c.y + 54)
     }
 }
 
