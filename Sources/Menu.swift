@@ -52,25 +52,6 @@ enum Ink {
         s.append(NSAttributedString(string: "MIN", attributes: mono(11, kern: 1)))
         return s
     }
-
-    /// The countdown row (menu header), 54 pt tall:
-    ///
-    ///     FOCUS                38:12      (caption centered on the 24 pt digits)
-    ///     ▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-    static func readout(caption: String, value: NSAttributedString, fraction: Double, in bounds: NSRect, inset: CGFloat) {
-        let x = inset, right = bounds.maxX - trailing
-        let timeFont = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
-        let labelFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        let ty: CGFloat = 18
-        drawRight(value, right: right, y: ty)
-        let middle = ty - timeFont.descender + timeFont.capHeight / 2
-        NSAttributedString(string: caption, attributes: mono(11, kern: 1))
-            .draw(at: NSPoint(x: x, y: (middle - labelFont.capHeight / 2 + labelFont.descender).rounded()))
-        let n = 20
-        let lit = Int((Double(n) * min(1, max(0, fraction))).rounded(.down))
-        // Thicker than the Dim bar: this one is the readout, that one a control.
-        segments(n, lit: lit, in: NSRect(x: x, y: 8, width: right - x, height: 5))
-    }
 }
 
 /// A setting as a segmented bar you click or drag, one segment per step (Focus, Rest, Dim):
@@ -137,110 +118,81 @@ final class StepBarView: NSView {
     }
 }
 
-/// Menu header while a focus or rest runs (Ink.readout; FOCUS · PAUSED while paused).
-/// Ticks once a second only while the menu is open (the view exists only then), and not at all
-/// while paused.
-final class TimerItemView: NSView {
-    private let inset: CGFloat
-    private let caption: String
-    private let start: Date
-    private let end: Date
-    private let pausedLeft: TimeInterval?
-    private var timer: Timer?
-
-    init(caption: String, start: Date, end: Date, pausedLeft: TimeInterval? = nil, inset: CGFloat) {
-        self.inset = inset
-        self.caption = caption
-        self.start = start
-        self.end = end
-        self.pausedLeft = pausedLeft
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 54))
-        autoresizingMask = .width
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func viewDidMoveToWindow() {
-        timer?.invalidate()
-        timer = nil
-        guard window != nil, pausedLeft == nil else { return }
-        timer = Ink.secondTimer(to: end, self)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let left = pausedLeft ?? max(0, end.timeIntervalSinceNow)
-        let total = end.timeIntervalSince(start)
-        let secs = Int(left.rounded(.up))
-        let time = NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60), attributes: Ink.mono(24, kern: 0.5))
-        Ink.readout(caption: caption, value: time, fraction: total > 0 ? 1 - left / total : 1, in: bounds, inset: inset)
-    }
-}
-
-/// Time to the next 20-20-20 reminder, under the phase header. Same 20 columns as the header's
-/// bar, one segment a minute. Reads EyeBreak's deadline, so it follows a reminder that fires
-/// while the menu is open; ticks only while the menu is open.
+/// Menu header, two countdowns side by side like Pressure's header: the focus / rest on the
+/// left, the next 20-20-20 reminder on the right; captions on one baseline, a bar under each.
 ///
-///     LOOK AWAY            12:34
-///     ▬▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-final class EyeItemView: NSView {
+///     38:12              12:34
+///     FOCUS          LOOK AWAY
+///     ▬▬▬▬ ─ ─ ─ ─ ─   ▬▬▬ ─ ─ ─ ─ ─ ─
+///
+/// Bars sit on the old 20-column grid with a blank column between: 10 segments each.
+/// Ticks once a second only while the menu is open (the view exists only then), and only for
+/// a clock that runs. A stopped clock shows its full length (idle: next focus; rest: no reminder).
+final class HeaderView: NSView {
+    enum Left {
+        /// A running or paused focus / rest.
+        case clock(caption: String, start: Date, end: Date, pausedLeft: TimeInterval?)
+        /// Idle (next focus length) or a finished focus (minutes focused).
+        case still(caption: String, value: NSAttributedString, fraction: Double)
+    }
+
+    private static let valueFont = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
     private static let captionFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-    private static let valueFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+    private let left: Left
     private weak var eyes: EyeBreak?
     private let inset: CGFloat
-    private var timer: Timer?
+    private var timers: [Timer] = []
 
-    init(_ eyes: EyeBreak, inset: CGFloat) {
+    init(_ left: Left, eyes: EyeBreak?, inset: CGFloat) {
+        self.left = left
         self.eyes = eyes
         self.inset = inset
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 31))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 72))
         autoresizingMask = .width
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidMoveToWindow() {
-        timer?.invalidate()
-        timer = nil
-        guard window != nil, let due = eyes?.due else { return }
-        timer = Ink.secondTimer(to: due, self)
+        timers.forEach { $0.invalidate() }
+        timers = []
+        guard window != nil else { return }
+        if case let .clock(_, _, end, nil) = left { timers.append(Ink.secondTimer(to: end, self)) }
+        if let due = eyes?.due { timers.append(Ink.secondTimer(to: due, self)) }
+    }
+
+    static func clock(_ seconds: TimeInterval) -> NSAttributedString {
+        let s = Int(max(0, seconds).rounded(.up))
+        return NSAttributedString(string: String(format: "%02d:%02d", s / 60, s % 60), attributes: Ink.mono(24, kern: 0.5))
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let eyes, let due = eyes.due else { return }
-        let left = max(0, due.timeIntervalSinceNow)
-        let secs = Int(left.rounded(.up))
-        let right = bounds.maxX - Ink.trailing
-        // Caption and value on one baseline, caps centered in the top 22 pt like the bar rows.
-        let base = (bounds.height - 11 - Self.valueFont.capHeight / 2).rounded()
-        NSAttributedString(string: "LOOK AWAY", attributes: Ink.mono(11, kern: 1))
-            .draw(at: NSPoint(x: inset, y: base + Self.captionFont.descender))
-        let value = NSAttributedString(string: String(format: "%02d:%02d", secs / 60, secs % 60), attributes: Ink.mono(12))
-        Ink.drawRight(value, right: right, y: base + Self.valueFont.descender)
-        let n = 20
-        let lit = Int((Double(n) * min(1, max(0, 1 - left / eyes.interval))).rounded(.down))
-        Ink.segments(n, lit: lit, in: NSRect(x: inset, y: 6, width: right - inset, height: 3))
-    }
-}
+        let x = inset, right = bounds.maxX - Ink.trailing
+        let valueY: CGFloat = 36, captionY: CGFloat = 20, barY: CGFloat = 8
 
-/// Menu header between a focus and its rest: how long the focus ran, still and without a timer.
-final class FocusedItemView: NSView {
-    private let minutes: Double
-    private let fraction: Double
-    private let inset: CGFloat
+        let caption: String, value: NSAttributedString, fraction: Double
+        switch left {
+        case let .clock(c, start, end, pausedLeft):
+            let remaining = pausedLeft ?? max(0, end.timeIntervalSinceNow)
+            let total = end.timeIntervalSince(start)
+            (caption, value, fraction) = (c, Self.clock(remaining), total > 0 ? 1 - remaining / total : 1)
+        case let .still(c, v, f):
+            (caption, value, fraction) = (c, v, f)
+        }
 
-    init(minutes: Double, fraction: Double, inset: CGFloat) {
-        self.minutes = minutes
-        self.fraction = fraction
-        self.inset = inset
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 54))
-        autoresizingMask = .width
-    }
+        let eyeLeft = eyes.flatMap { e in e.due.map { $0.timeIntervalSinceNow } } ?? eyes?.interval ?? 0
+        let eyeTotal = eyes?.interval ?? 1
 
-    required init?(coder: NSCoder) { fatalError() }
+        value.draw(at: NSPoint(x: x, y: valueY))
+        NSAttributedString(string: caption, attributes: Ink.mono(11, kern: 1)).draw(at: NSPoint(x: x, y: captionY))
+        Ink.drawRight(Self.clock(eyeLeft), right: right, y: valueY)
+        Ink.drawRight(NSAttributedString(string: "LOOK AWAY", attributes: Ink.mono(11, kern: 1)), right: right, y: captionY)
 
-    override func draw(_ dirtyRect: NSRect) {
-        Ink.readout(caption: "FOCUSED", value: Ink.minutes(EndScreen.fmt(minutes)),
-                    fraction: fraction, in: bounds, inset: inset)
+        // 21 columns: 10 | blank | 10. Thicker than the 3 pt setting bars: these are readouts.
+        let gap: CGFloat = 2, step = (right - x + gap) / 21, half = 10 * step - gap
+        func lit(_ f: Double) -> Int { Int((10 * min(1, max(0, f))).rounded(.down)) }
+        Ink.segments(10, lit: lit(fraction), in: NSRect(x: x, y: barY, width: half, height: 5))
+        Ink.segments(10, lit: lit(1 - eyeLeft / eyeTotal), in: NSRect(x: right - half, y: barY, width: half, height: 5))
     }
 }
 
@@ -341,37 +293,30 @@ final class MenuController: NSObject, NSMenuDelegate {
         let loginOn = SMAppService.mainApp.status == .enabled
         let inset: CGFloat = loginOn ? 24 : 16
 
-        // Readouts first (phase, then the 20-20-20 countdown), then the actions.
-        // No row while there is no deadline (a rest is running).
-        @discardableResult func eyeRow() -> Bool {
-            guard let eyes = host.eyeBreak, eyes.due != nil else { return false }
-            let it = NSMenuItem()
-            it.view = EyeItemView(eyes, inset: inset)
-            menu.addItem(it)
-            return true
+        let left: HeaderView.Left
+        switch session.phase {
+        case .idle:
+            left = .still(caption: "READY", value: HeaderView.clock(settings.focusMinutes * 60), fraction: 0)
+        case .focus, .rest:
+            let caption = session.phase == .rest ? "REST" : session.paused ? "PAUSED" : "FOCUS"
+            left = .clock(caption: caption, start: session.start, end: session.end, pausedLeft: session.pausedLeft)
+        case .due:
+            left = .still(caption: "FOCUSED", value: Ink.minutes(EndScreen.fmt(session.focusedMinutes)),
+                          fraction: session.focusedFraction)
         }
+        let header = NSMenuItem()
+        header.view = HeaderView(left, eyes: host.eyeBreak, inset: inset)
+        menu.addItem(header)
+        menu.addItem(.separator())
 
         switch session.phase {
         case .idle:
-            if eyeRow() { menu.addItem(.separator()) }
             menu.addItem(withHotKey(item("Start Focus", #selector(next)), host.focusHotKey))
         case .focus, .rest:
             let focus = session.phase == .focus
-            let clock = NSMenuItem()
-            let caption = !focus ? "REST" : session.paused ? "FOCUS · PAUSED" : "FOCUS"
-            clock.view = TimerItemView(caption: caption, start: session.start, end: session.end,
-                                       pausedLeft: session.pausedLeft, inset: inset)
-            menu.addItem(clock)
-            eyeRow()
-            menu.addItem(.separator())
             if focus { menu.addItem(item(session.paused ? "Resume" : "Pause", #selector(togglePause))) }
             menu.addItem(withHotKey(item(focus ? "End Focus" : "End Rest", #selector(next)), host.focusHotKey))
         case .due:
-            let header = NSMenuItem()
-            header.view = FocusedItemView(minutes: session.focusedMinutes, fraction: session.focusedFraction, inset: inset)
-            menu.addItem(header)
-            eyeRow()
-            menu.addItem(.separator())
             menu.addItem(withHotKey(item("Start Rest", #selector(next)), host.focusHotKey))
         }
 
