@@ -11,6 +11,7 @@ final class Settings {
             "dimLevel": 0.35,
             "focusMinutes": 40,
             "restMinutes": 10,
+            "eyeMinutes": 20,
             "focusHotKey": "ctrl+opt+cmd+f",
             "menuHotKey": "ctrl+opt+cmd+d",
         ])
@@ -32,6 +33,8 @@ final class Settings {
         get { max(0.05, d.double(forKey: "restMinutes")) }
         set { d.set(newValue, forKey: "restMinutes") }
     }
+    /// 20-20-20 reminder interval; not in the menu, only a launch argument for tests (`-eyeMinutes 0.1`).
+    var eyeMinutes: Double { max(0.05, d.double(forKey: "eyeMinutes")) }
 
     /// e.g. "ctrl+opt+cmd+f". Change with `defaults write com.jayden.dimmer focusHotKey "…"`, then relaunch.
     var focusHotKey: String { d.string(forKey: "focusHotKey") ?? "ctrl+opt+cmd+f" }

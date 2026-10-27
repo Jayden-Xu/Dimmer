@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     private var menu: MenuController!
     private let hotKeys = HotKey()
     private let endScreen = EndScreen()
+    private var eyeBreak: EyeBreak!
     let session = Session()
     private(set) var focusHotKey: HotKey.Combo?
 
@@ -23,6 +24,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
             self?.menu.close()
             self?.refresh()
         }
+        eyeBreak = EyeBreak(minutes: settings.eyeMinutes) { [weak self] in
+            // Skip if a FOCUSED / RESTED notice is up; the next one comes 20 minutes later.
+            guard let self, !endScreen.isShowing else { return }
+            endScreen.show("LOOK AWAY", value: "20", unit: "SEC", hold: 2.4)
+        }
         session.onTimeUp = { [weak self] phase, minutes in
             self?.endScreen.show(phase == .focus ? "FOCUSED" : "RESTED", minutes: minutes)
         }
@@ -34,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
 
     private func refresh() {
         menu.setIcon(focusing: session.phase == .focus && !session.paused)
+        eyeBreak.setResting(session.phase == .rest)
     }
 
     // MARK: MenuHost

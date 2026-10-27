@@ -1,21 +1,29 @@
 import AppKit
 
 /// Shown when a focus or a rest runs out by itself (not when ended by hand): every screen goes
-/// dark (over full-screen apps too) with how long it lasted, then fades on its own. It never takes
+/// dark (over full-screen apps too) with how long it lasted, then fades on its own. The 20-20-20
+/// reminder uses it too. It never takes
 /// the keyboard; a click fades it right away. Windows exist only while shown.
 @MainActor
 final class EndScreen {
     private var windows: [EndWindow] = []
     private var generation = 0
 
+    var isShowing: Bool { !windows.isEmpty }
+
     /// `caption`: FOCUSED or RESTED.
     func show(_ caption: String, minutes: Double) {
+        show(caption, value: Self.fmt(minutes), unit: "MIN", hold: 2.4)
+    }
+
+    /// `hold`: seconds from showing to the start of the fade.
+    func show(_ caption: String, value: String, unit: String, hold: TimeInterval) {
         dismiss(fade: 0)
         generation += 1
         let shown = generation
         for screen in NSScreen.screens {
             let w = EndWindow(frame: screen.frame) { [weak self] in self?.dismiss() }
-            w.contentView?.addSubview(Self.content(caption, minutes: minutes, size: screen.frame.size))
+            w.contentView?.addSubview(Self.content(caption, value: value, unit: unit, size: screen.frame.size))
             w.orderFrontRegardless()
             windows.append(w)
         }
@@ -23,8 +31,8 @@ final class EndScreen {
             ctx.duration = 0.4
             for w in windows { w.animator().alphaValue = 1 }
         }
-        // One one-shot: fade after a short look.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
+        // One one-shot: fade after the hold.
+        DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
             MainActor.assumeIsolated { if self?.generation == shown { self?.dismiss() } }
         }
     }
@@ -42,13 +50,13 @@ final class EndScreen {
         })
     }
 
-    /// FOCUSED / 40 MIN, centered. Same look as the menu: SF Mono, uppercase labels with tracking,
+    /// FOCUSED / 40 MIN (or LOOK AWAY / 20 SEC), centered. Same look as the menu: SF Mono, uppercase labels with tracking,
     /// text at full strength (white on the dark screen).
-    private static func content(_ caption: String, minutes: Double, size: NSSize) -> NSView {
+    private static func content(_ caption: String, value: String, unit: String, size: NSSize) -> NSView {
         let top = label(text(caption, size: 14, kern: 4))
-        let time = NSMutableAttributedString(attributedString: text(fmt(minutes), size: 120, kern: 2))
+        let time = NSMutableAttributedString(attributedString: text(value, size: 120, kern: 2))
         time.addAttribute(.kern, value: 14, range: NSRange(location: time.length - 1, length: 1))  // a mono space is too wide
-        time.append(text("MIN", size: 28, kern: 3))
+        time.append(text(unit, size: 28, kern: 3))
         let bottom = label(time)
         let gap: CGFloat = 4
         let height = top.frame.height + gap + bottom.frame.height
