@@ -10,7 +10,6 @@ final class Settings {
         d.register(defaults: [
             "dimLevel": 0.35,
             "focusMinutes": 40,
-            "restMinutes": 10,
             "eyeMinutes": 20,
             "focusHotKey": "ctrl+opt+cmd+f",
             "menuHotKey": "ctrl+opt+cmd+d",
@@ -22,16 +21,12 @@ final class Settings {
         get { d.double(forKey: "dimLevel") }
         set { d.set(newValue, forKey: "dimLevel") }
     }
-    /// Set from the menu: focus 5–100 min in 5 min steps, rest 1–20 min.
-    /// Test runs can override them with launch arguments (never stored):
-    /// `open dimmer.app --args -focusMinutes 0.1 -restMinutes 0.1`.
+    /// Set from the menu: focus 5–100 min in 5 min steps. A rest has no length.
+    /// Test runs can override it with a launch argument (never stored):
+    /// `open dimmer.app --args -focusMinutes 0.1`.
     var focusMinutes: Double {
         get { max(0.05, d.double(forKey: "focusMinutes")) }
         set { d.set(newValue, forKey: "focusMinutes") }
-    }
-    var restMinutes: Double {
-        get { max(0.05, d.double(forKey: "restMinutes")) }
-        set { d.set(newValue, forKey: "restMinutes") }
     }
     /// 20-20-20 reminder interval; not in the menu, only a launch argument for tests (`-eyeMinutes 0.1`).
     var eyeMinutes: Double { max(0.05, d.double(forKey: "eyeMinutes")) }

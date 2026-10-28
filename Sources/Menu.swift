@@ -19,8 +19,10 @@ enum Ink {
     static let unlit = NSColor.labelColor.withAlphaComponent(0.125)
     /// The last lit segment: the gauge's scan head.
     static let head = NSColor.labelColor.withAlphaComponent(0.9)
-    /// Tick scales.
+    /// Axis ticks.
     static let tick = NSColor.labelColor.withAlphaComponent(0.4)
+    /// A rest on the day strip, lighter than a focus.
+    static let rest = NSColor.labelColor.withAlphaComponent(0.3)
     /// Separators end this far from the right edge; values and bars end there too.
     static let trailing: CGFloat = 16
 
@@ -59,20 +61,6 @@ enum Ink {
         }
     }
 
-    /// A scale outside a 240° gauge open at the bottom, a tick every `step` degrees, every fifth longer.
-    static func ticks(center c: NSPoint, radius r: CGFloat, step: CGFloat) {
-        let n = Int((240 / step).rounded())
-        let p = NSBezierPath()
-        for k in 0...n {
-            let a = (210 - CGFloat(k) * step) * .pi / 180, len: CGFloat = k % 5 == 0 || k == n ? 4 : 2.2
-            p.move(to: NSPoint(x: c.x + r * cos(a), y: c.y + r * sin(a)))
-            p.line(to: NSPoint(x: c.x + (r + len) * cos(a), y: c.y + (r + len) * sin(a)))
-        }
-        p.lineWidth = 0.7
-        tick.setStroke()
-        p.stroke()
-    }
-
     /// Draws right-aligned at `right`. Kern also follows the last glyph; leave it out so the text ends flush.
     static func drawRight(_ text: NSAttributedString, right: CGFloat, y: CGFloat) {
         let kern = text.attribute(.kern, at: max(0, text.length - 1), effectiveRange: nil) as? CGFloat ?? 0
@@ -92,7 +80,15 @@ enum Ink {
 
     /// Redraws `view` on the whole seconds of a countdown to `end`; .common so it runs while the menu tracks.
     static func secondTimer(to end: Date, _ view: NSView) -> Timer {
-        let first = Date() + end.timeIntervalSinceNow.truncatingRemainder(dividingBy: 1) + 0.01
+        tick(first: Date() + end.timeIntervalSinceNow.truncatingRemainder(dividingBy: 1) + 0.01, view)
+    }
+
+    /// The same for a count-up from `start`.
+    static func secondTimer(since start: Date, _ view: NSView) -> Timer {
+        tick(first: Date() + (1 - Date().timeIntervalSince(start).truncatingRemainder(dividingBy: 1)) + 0.01, view)
+    }
+
+    private static func tick(first: Date, _ view: NSView) -> Timer {
         let t = Timer(fire: first, interval: 1, repeats: true) { [weak view] _ in
             MainActor.assumeIsolated { view?.needsDisplay = true }
         }
@@ -102,7 +98,7 @@ enum Ink {
     }
 }
 
-/// A setting as a segmented bar you click or drag, one segment per step (Focus, Rest, Dim):
+/// A setting as a segmented bar you click or drag, one segment per step (Focus, Dim):
 ///
 ///     Dim                    35%
 ///     ▬▬▬▬▬▬▬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
@@ -187,6 +183,8 @@ final class HeaderView: NSView {
     enum Clock {
         /// A running or paused focus / rest.
         case running(caption: String, start: Date, end: Date, pausedLeft: TimeInterval?)
+        /// A running rest: counts up, has no end.
+        case elapsing(caption: String, start: Date)
         /// Idle (next focus length) or a finished focus (minutes focused).
         case still(caption: String, value: NSAttributedString, fraction: Double)
     }
@@ -214,6 +212,7 @@ final class HeaderView: NSView {
         guard window != nil else { return }
         // Each countdown redraws on its own whole seconds.
         if case let .running(_, _, end, nil) = clock { timers.append(Ink.secondTimer(to: end, self)) }
+        if case let .elapsing(_, start) = clock { timers.append(Ink.secondTimer(since: start, self)) }
         if let due = eyes?.due { timers.append(Ink.secondTimer(to: due, self)) }
     }
 
@@ -225,6 +224,16 @@ final class HeaderView: NSView {
 
     static func clock(_ seconds: TimeInterval) -> NSAttributedString {
         NSAttributedString(string: mmss(seconds), attributes: Ink.mono(Ink.hero, kern: 0.5))
+    }
+
+    /// A rest's elapsed time: "12:34", or "1:05" with a small H from the first hour on.
+    static func elapsed(_ seconds: TimeInterval) -> NSAttributedString {
+        let s = Int(max(0, seconds))
+        guard s >= 3600 else { return NSAttributedString(string: String(format: "%02d:%02d", s / 60, s % 60), attributes: Ink.mono(Ink.hero, kern: 0.5)) }
+        let a = NSMutableAttributedString(string: String(format: "%d:%02d", s / 3600, s / 60 % 60), attributes: Ink.mono(Ink.hero, kern: 0.5))
+        a.addAttribute(.kern, value: 3, range: NSRange(location: a.length - 1, length: 1))
+        a.append(NSAttributedString(string: "H", attributes: Ink.mono(Ink.caption, kern: 1)))
+        return a
     }
 
     /// "38 MIN": the unit small on the number's baseline.
@@ -242,6 +251,8 @@ final class HeaderView: NSView {
             let remaining = pausedLeft ?? max(0, end.timeIntervalSinceNow)
             let total = end.timeIntervalSince(start)
             (caption, value, fraction) = (c, Self.clock(remaining), total > 0 ? 1 - remaining / total : 1)
+        case let .elapsing(c, start):
+            (caption, value, fraction) = (c, Self.elapsed(Date().timeIntervalSince(start)), 0)
         case let .still(c, v, f):
             (caption, value, fraction) = (c, v, f)
         }
@@ -255,7 +266,6 @@ final class HeaderView: NSView {
         func lit(_ n: Int, _ f: Double) -> Int { Int((Double(n) * min(1, max(0, f))).rounded(.down)) }
         Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 12, gap: 3)
         Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: 36, width: 7, gap: 2.5)
-        Ink.ticks(center: c, radius: r + 5, step: 6)
 
         // Each label centered under its gauge or time; labels share one baseline.
         // The 38 pt time is centered on the gauge's height; its column ends at the separators.
@@ -369,9 +379,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         switch session.phase {
         case .idle:
             clock = .still(caption: "READY", value: HeaderView.clock(settings.focusMinutes * 60), fraction: 0)
-        case .focus, .rest:
-            let caption = session.phase == .rest ? "REST" : session.paused ? "PAUSED" : "FOCUS"
-            clock = .running(caption: caption, start: session.start, end: session.end, pausedLeft: session.pausedLeft)
+        case .focus:
+            clock = .running(caption: session.paused ? "PAUSED" : "FOCUS", start: session.start, end: session.end, pausedLeft: session.pausedLeft)
+        case .rest:
+            clock = .elapsing(caption: "REST", start: session.start)
         case .due:
             clock = .still(caption: "DONE", value: HeaderView.minutes(EndScreen.fmt(session.focusedMinutes)),
                            fraction: session.focusedFraction)
@@ -403,7 +414,6 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         let s = settings
         bar("Focus", steps: Int((s.focusMinutes / 5).rounded()), inset: inset, format: { "\($0 * 5) min" }) { s.focusMinutes = Double($0 * 5) }
-        bar("Rest", steps: Int(s.restMinutes.rounded()), inset: inset, format: { "\($0) min" }) { s.restMinutes = Double($0) }
         bar("Dim", steps: Int((s.dimLevel * 20).rounded()), least: 0, inset: inset, format: { "\($0 * 5)%" }) { [weak self] in
             self?.host?.setDimLevel(Double($0) / 20)
         }

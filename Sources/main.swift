@@ -26,12 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
             self?.refresh()
         }
         eyeBreak = EyeBreak(minutes: settings.eyeMinutes) { [weak self] in
-            // Skip if a FOCUSED / RESTED notice is up; the next one comes 20 minutes later.
+            // Skip if a FOCUSED notice is up; the next one comes 20 minutes later.
             guard let self, !endScreen.isShowing else { return }
             endScreen.show("LOOK AWAY", value: "20", unit: "SEC", hold: 2.4)
         }
-        session.onTimeUp = { [weak self] phase, minutes in
-            self?.endScreen.show(phase == .focus ? "FOCUSED" : "RESTED", minutes: minutes)
+        session.onTimeUp = { [weak self] minutes in
+            self?.endScreen.show("FOCUSED", minutes: minutes)
         }
 
         // kill / pkill (and so a reinstall) end the process without applicationWillTerminate: save first.

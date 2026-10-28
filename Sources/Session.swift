@@ -3,16 +3,18 @@ import Foundation
 /// idle → focus → due → rest → idle.
 ///
 /// `due`: the focus is over (ran out, or ended early); the rest starts, and counts, from
-/// "Start Rest" in the menu or the hotkey. The only timer is one wall-clock one-shot at
-/// the end of a focus or a rest (sleep counts; a deadline passed while asleep fires right on wake).
-/// A paused focus has no timer at all, only the seconds it had left.
+/// "Start Rest" in the menu or the hotkey. A rest has no length and no timer: it runs until it is
+/// ended by hand. The only timer is one wall-clock one-shot at the end of a focus (sleep counts; a
+/// deadline passed while asleep fires right on wake). A paused focus has no timer at all, only the
+/// seconds it had left.
 @MainActor
 final class Session {
     enum Phase { case idle, focus, due, rest }
 
     private(set) var phase = Phase.idle
-    /// Start and end of the running focus or rest. Resuming a focus shifts both by the pause,
-    /// so `end - start` stays the full length and `now - start` the time actually focused.
+    /// Start and end of the running focus (a rest has only a start; its end is never). Resuming a focus
+    /// shifts both by the pause, so `end - start` stays the full length and `now - start` the time
+    /// actually focused.
     private(set) var start = Date.distantPast
     private(set) var end = Date.distantPast
     /// Seconds left in a paused focus; nil while running.
@@ -27,8 +29,8 @@ final class Session {
     private var timer: DispatchSourceTimer?
 
     var onChange: (() -> Void)?
-    /// A focus or rest ran out by itself (not ended by hand): the phase that ended and its minutes.
-    var onTimeUp: ((Phase, Double) -> Void)?
+    /// A focus ran out by itself (not ended by hand): its minutes.
+    var onTimeUp: ((Double) -> Void)?
 
     var paused: Bool { pausedLeft != nil }
 
@@ -38,7 +40,7 @@ final class Session {
 
     private func focusRanOut() {
         endFocus()
-        onTimeUp?(.focus, focusedMinutes)
+        onTimeUp?(focusedMinutes)
     }
 
     /// Time ran out, or ended early from the menu / hotkey (paused or not).
@@ -63,7 +65,7 @@ final class Session {
             self.runStart = now
         }
         if phase == .rest, let restMark {
-            FocusLog.shared.addRest(from: restMark, to: min(now, end), persist: persist)
+            FocusLog.shared.addRest(from: restMark, to: now, persist: persist)
             self.restMark = now
         }
     }
@@ -87,17 +89,17 @@ final class Session {
         onChange?()
     }
 
+    /// A rest has no length and shows nothing when it ends: only the menu or the hotkey ends it.
     func beginRest() {
-        run(.rest, minutes: Settings.shared.restMinutes) { [weak self] in
-            guard let self else { return }
-            let minutes = end.timeIntervalSince(start) / 60
-            stop()
-            onTimeUp?(.rest, minutes)
-        }
+        start = Date()
+        end = .distantFuture
+        runStart = nil
+        restMark = start
+        set(.rest)
     }
 
     func stop() {
-        if phase == .rest, let restMark { FocusLog.shared.addRest(from: restMark, to: min(Date(), end)) }
+        if phase == .rest, let restMark { FocusLog.shared.addRest(from: restMark, to: Date()) }
         restMark = nil
         set(.idle)
     }
@@ -106,8 +108,8 @@ final class Session {
         let seconds = minutes * 60
         start = Date()
         end = start + seconds
-        runStart = p == .focus ? start : nil
-        restMark = p == .rest ? start : nil
+        runStart = start
+        restMark = nil
         set(p)
         arm(seconds, then: done)
     }
