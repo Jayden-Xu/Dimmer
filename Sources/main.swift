@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
         // kill / pkill (and so a reinstall) end the process without applicationWillTerminate: save first.
         signal(SIGTERM, SIG_IGN)
         termination.setEventHandler { [weak self] in
-            self?.session.checkpoint()
+            self?.session.checkpoint(persist: true)
             NSApp.terminate(nil)
         }
         termination.activate()
@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     }
 
     func applicationWillTerminate(_ note: Notification) {
-        session.checkpoint()
+        session.checkpoint(persist: true)
     }
 
     private func refresh() {

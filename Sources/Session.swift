@@ -53,16 +53,17 @@ final class Session {
         set(.due)
     }
 
-    /// Writes what the running focus or rest has accumulated so far to the log, so the menu's day strip and
-    /// totals are current and nothing is lost if the app quits. Called when the menu opens and on quit.
-    func checkpoint() {
+    /// Adds what the running focus or rest has accumulated so far to the log, so the menu's day strip and
+    /// totals are current. The menu calls it without `persist` (memory only, nothing written); quit and
+    /// SIGTERM call it with, so nothing is lost.
+    func checkpoint(persist: Bool) {
         let now = Date()
         if phase == .focus, let runStart {
-            FocusLog.shared.addRun(from: runStart, to: min(now, end))
+            FocusLog.shared.addRun(from: runStart, to: min(now, end), persist: persist)
             self.runStart = now
         }
         if phase == .rest, let restMark {
-            FocusLog.shared.addRest(from: restMark, to: min(now, end))
+            FocusLog.shared.addRest(from: restMark, to: min(now, end), persist: persist)
             self.restMark = now
         }
     }

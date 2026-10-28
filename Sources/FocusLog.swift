@@ -1,8 +1,8 @@
 import Foundation
 
 /// Today's focus and rest time, for the menu's day ring: when focus ran (one span per stretch without a
-/// pause) and how long rests lasted. Cleared at midnight, so it never grows. Written to UserDefaults when
-/// a focus run or a rest stops, and when the menu opens or the app quits (a checkpoint of the one running).
+/// pause) and how long rests lasted. Cleared at midnight, so it never grows. Kept in memory, which is what
+/// the menu draws from, and written to UserDefaults when a focus run or a rest stops and when the app quits.
 @MainActor
 final class FocusLog {
     static let shared = FocusLog()
@@ -26,8 +26,8 @@ final class FocusLog {
         rest = m["rest"] as? Double ?? 0
     }
 
-    /// A stretch of running focus ended (paused, ended, or ran out).
-    func addRun(from: Date, to: Date) {
+    /// A stretch of running focus ended (paused, ended, or ran out), or is being checkpointed (`persist` false).
+    func addRun(from: Date, to: Date, persist: Bool = true) {
         rollover()
         let from = max(from, day)
         guard to > from else { return }
@@ -37,14 +37,14 @@ final class FocusLog {
         } else {
             spans.append((from, to))
         }
-        save()
+        if persist { save() }
     }
 
-    /// A rest ended (by hand or at its end).
-    func addRest(from: Date, to: Date) {
+    /// A rest ended (by hand or at its end), or is being checkpointed (`persist` false).
+    func addRest(from: Date, to: Date, persist: Bool = true) {
         rollover()
         rest += max(0, to.timeIntervalSince(max(from, day)))
-        save()
+        if persist { save() }
     }
 
     func today() -> Today {

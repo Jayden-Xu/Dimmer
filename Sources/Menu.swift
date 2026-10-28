@@ -381,8 +381,9 @@ final class MenuController: NSObject, NSMenuDelegate {
         header.view = HeaderView(clock, eyes: host.eyeBreak, inset: inset)
         menu.addItem(header)
         menu.addItem(.separator())
-        // Opening the menu saves the running focus or rest first, then draws from what is saved.
-        session.checkpoint()
+        // Opening the menu adds the running focus or rest to the log in memory first, then draws from it.
+        // Nothing is written: that happens when a focus or rest stops and when the app quits.
+        session.checkpoint(persist: false)
         let day = NSMenuItem()
         day.view = DayView(FocusLog.shared.today(), inset: inset)
         menu.addItem(day)
