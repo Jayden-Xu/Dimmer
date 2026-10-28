@@ -45,7 +45,7 @@ final class DayView: NSView {
         // The strip: the empty day, then each stretch of lit cells as one block, rests light and focus dark.
         Ink.unlit.setFill()
         NSRect(x: x0, y: h - 46, width: w, height: 36).fill()
-        for (cells, color) in [(rest.cells, Ink.rest), (focus.cells, Ink.head)] {
+        for (cells, color) in [(rest.cells, Ink.rest), (focus.cells, Ink.focus)] {
             color.setFill()
             var cell = 0
             while cell < n {
@@ -85,15 +85,16 @@ final class DayView: NSView {
         }
 
         // Time focused and rested today, each a number over its label, centered in its half; a small
-        // square in the strip's color marks which is which.
+        // square in the strip's color marks which is which, centered with its label as one group.
         func hhmm(_ seconds: Double) -> String { String(format: "%d:%02d", Int(seconds) / 3600, Int(seconds) / 60 % 60) }
-        for (k, block) in [(hhmm(focus.total), "FOCUS", Ink.head), (hhmm(rest.total), "REST", Ink.rest)].enumerated() {
+        for (k, block) in [(hhmm(focus.total), "FOCUS", Ink.focus), (hhmm(rest.total), "REST", Ink.rest)].enumerated() {
             let cx = x0 + w * (k == 0 ? 0.25 : 0.75)
             let label = NSAttributedString(string: block.1, attributes: caption)
             Ink.draw(NSAttributedString(string: block.0, attributes: Ink.mono(Ink.body)), x: cx, baseline: h - 100, anchor: 0.5)
-            Ink.draw(label, x: cx, baseline: h - 117, anchor: 0.5)
+            let groupLeft = cx - (7 + 5 + Ink.width(label)) / 2
             block.2.setFill()
-            NSRect(x: (cx - Ink.width(label) / 2 - 12).rounded(), y: h - 117, width: 7, height: 7).fill()
+            NSRect(x: groupLeft.rounded(), y: h - 117, width: 7, height: 7).fill()
+            Ink.draw(label, x: groupLeft + 12, baseline: h - 117, anchor: 0)
         }
     }
 }

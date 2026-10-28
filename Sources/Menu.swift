@@ -21,7 +21,8 @@ enum Ink {
     static let head = NSColor.labelColor.withAlphaComponent(0.9)
     /// Axis ticks.
     static let tick = NSColor.labelColor.withAlphaComponent(0.4)
-    /// A rest on the day strip, lighter than a focus.
+    /// Focus and rest on the day strip; a rest is lighter.
+    static let focus = NSColor.labelColor.withAlphaComponent(0.6)
     static let rest = NSColor.labelColor.withAlphaComponent(0.3)
     /// Separators end this far from the right edge; values and bars end there too.
     static let trailing: CGFloat = 16
