@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     private(set) var eyeBreak: EyeBreak!
     let session = Session()
     private(set) var focusHotKey: HotKey.Combo?
+    private let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
 
     func applicationDidFinishLaunching(_ note: Notification) {
         overlays = Overlays()
@@ -33,9 +34,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
             self?.endScreen.show(phase == .focus ? "FOCUSED" : "RESTED", minutes: minutes)
         }
 
+        // kill / pkill (and so a reinstall) end the process without applicationWillTerminate: save first.
+        signal(SIGTERM, SIG_IGN)
+        termination.setEventHandler { [weak self] in
+            self?.session.checkpoint()
+            NSApp.terminate(nil)
+        }
+        termination.activate()
+
         tracker.start()
         tracker.setActive(true)
         refresh()
+    }
+
+    func applicationWillTerminate(_ note: Notification) {
+        session.checkpoint()
     }
 
     private func refresh() {

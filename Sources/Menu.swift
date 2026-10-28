@@ -7,9 +7,21 @@ import ServiceManagement
 enum Ink {
     static let text = NSColor.labelColor
     /// Menu width, the same as Pressure's.
-    static let menuWidth: CGFloat = 230
+    static let menuWidth: CGFloat = 320
+    static let gaugeRadius: CGFloat = 52
+    /// The header's time is centered in this width, ending at the separators.
+    static let columnWidth: CGFloat = 120
+    /// The whole menu is SF Mono medium in three sizes: the header's time, everything else you read
+    /// (rows, stats, menu items), and captions (labels, axes), which are also spaced out.
+    static let hero: CGFloat = 38, body: CGFloat = 14, caption: CGFloat = 11
+    static let bodyFont = NSFont.monospacedSystemFont(ofSize: body, weight: .medium)
     static let lit = NSColor.labelColor.withAlphaComponent(0.5)
     static let unlit = NSColor.labelColor.withAlphaComponent(0.125)
+    /// The last lit segment: the gauge's scan head.
+    static let head = NSColor.labelColor.withAlphaComponent(0.9)
+    /// Hairlines: guides and tick scales.
+    static let hair = NSColor.labelColor.withAlphaComponent(0.14)
+    static let tick = NSColor.labelColor.withAlphaComponent(0.4)
     /// Separators end this far from the right edge; values and bars end there too.
     static let trailing: CGFloat = 16
 
@@ -43,9 +55,23 @@ enum Ink {
             p.appendArc(withCenter: c, radius: r, startAngle: a0, endAngle: a1, clockwise: true)
             p.appendArc(withCenter: c, radius: r - w, startAngle: a1, endAngle: a0, clockwise: false)
             p.close()
-            (i < lit ? Self.lit : unlit).setFill()
+            (i < lit ? (i == lit - 1 ? head : Self.lit) : unlit).setFill()
             p.fill()
         }
+    }
+
+    /// A scale outside a 240° gauge open at the bottom, a tick every `step` degrees, every fifth longer.
+    static func ticks(center c: NSPoint, radius r: CGFloat, step: CGFloat) {
+        let n = Int((240 / step).rounded())
+        let p = NSBezierPath()
+        for k in 0...n {
+            let a = (210 - CGFloat(k) * step) * .pi / 180, len: CGFloat = k % 5 == 0 || k == n ? 4 : 2.2
+            p.move(to: NSPoint(x: c.x + r * cos(a), y: c.y + r * sin(a)))
+            p.line(to: NSPoint(x: c.x + (r + len) * cos(a), y: c.y + (r + len) * sin(a)))
+        }
+        p.lineWidth = 0.7
+        tick.setStroke()
+        p.stroke()
     }
 
     /// Draws right-aligned at `right`. Kern also follows the last glyph; leave it out so the text ends flush.
@@ -86,8 +112,7 @@ enum Ink {
 /// All bars have 20 segments, so their segments line up in one column grid.
 final class StepBarView: NSView {
     static let count = 20
-    private static let labelFont = NSFont.menuFont(ofSize: 0)
-    private static let valueFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+    private static let font = Ink.bodyFont
 
     private let label: String
     private let inset: CGFloat
@@ -107,28 +132,26 @@ final class StepBarView: NSView {
         self.format = format
         self.onChange = onChange
         self.steps = min(Self.count, max(least, steps))
-        super.init(frame: NSRect(x: 0, y: 0, width: Ink.menuWidth, height: 31))
+        super.init(frame: NSRect(x: 0, y: 0, width: Ink.menuWidth, height: 36))
         // The menu widens to its widest item; stretch with it so the bar ends at the separators.
         autoresizingMask = .width
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private var bar: NSRect { NSRect(x: inset, y: 6, width: bounds.maxX - Ink.trailing - inset, height: 3) }
+    private var bar: NSRect { NSRect(x: inset, y: 7, width: bounds.maxX - Ink.trailing - inset, height: 4) }
 
     override func draw(_ dirtyRect: NSRect) {
         Self.drawText(label, format(steps), inset: inset, in: bounds)
         Ink.segments(Self.count, lit: steps, in: bar)
     }
 
-    /// Label at the titles' inset, mono value at the right end, both in the top 22 pt of a row.
+    /// Name at the titles' inset, value at the right end, on one baseline 21 above the bottom; the bar is below it.
     static func drawText(_ label: String, _ value: String, inset: CGFloat, in bounds: NSRect) {
-        let line = labelFont.boundingRectForFont.height
-        let y = ((22 - line) / 2).rounded() + bounds.height - 22
-        (label as NSString).draw(at: NSPoint(x: inset, y: y), withAttributes: [.font: labelFont, .foregroundColor: Ink.text])
-        // Mono value, baseline-matched to the label.
-        let value = NSAttributedString(string: value, attributes: [.font: valueFont, .foregroundColor: Ink.text])
-        Ink.drawRight(value, right: bounds.maxX - Ink.trailing, y: y + labelFont.descender - valueFont.descender)
+        let y = 21 + font.descender
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: Ink.text]
+        (label as NSString).draw(at: NSPoint(x: inset, y: y), withAttributes: attributes)
+        Ink.drawRight(NSAttributedString(string: value, attributes: attributes), right: bounds.maxX - Ink.trailing, y: y)
     }
 
     // Own tracking loop: follows the drag even when the pointer leaves the row.
@@ -169,7 +192,7 @@ final class HeaderView: NSView {
         case still(caption: String, value: NSAttributedString, fraction: Double)
     }
 
-    private static let height: CGFloat = 80
+    private static let height: CGFloat = 126
     private let clock: Clock
     /// Where the menu's titles start, so the columns split the same span as the rows.
     private let inset: CGFloat
@@ -202,14 +225,14 @@ final class HeaderView: NSView {
     }
 
     static func clock(_ seconds: TimeInterval) -> NSAttributedString {
-        NSAttributedString(string: mmss(seconds), attributes: Ink.mono(28, kern: 0.5))
+        NSAttributedString(string: mmss(seconds), attributes: Ink.mono(Ink.hero, kern: 0.5))
     }
 
     /// "38 MIN": the unit small on the number's baseline.
     static func minutes(_ n: String) -> NSAttributedString {
-        let s = NSMutableAttributedString(string: n, attributes: Ink.mono(28, kern: 0.5))
+        let s = NSMutableAttributedString(string: n, attributes: Ink.mono(Ink.hero, kern: 0.5))
         s.addAttribute(.kern, value: 3, range: NSRange(location: s.length - 1, length: 1))
-        s.append(NSAttributedString(string: "MIN", attributes: Ink.mono(11, kern: 1)))
+        s.append(NSAttributedString(string: "MIN", attributes: Ink.mono(Ink.caption, kern: 1)))
         return s
     }
 
@@ -229,19 +252,20 @@ final class HeaderView: NSView {
         let left = inset, right = bounds.maxX - Ink.trailing
 
         // Same gauge size and place as Pressure's: lower ends 16 above the labels' baseline.
-        let r: CGFloat = 32, c = NSPoint(x: left + r, y: 24 + r / 2)
+        let r = Ink.gaugeRadius, c = NSPoint(x: left + r, y: 30 + r / 2)
         func lit(_ n: Int, _ f: Double) -> Int { Int((Double(n) * min(1, max(0, f))).rounded(.down)) }
-        Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 7, gap: 2)
-        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: 22, width: 4, gap: 1.5)
+        Ink.ring(10, lit: lit(10, fraction), center: c, radius: r, width: 12, gap: 3)
+        Ink.ring(20, lit: lit(20, 1 - eyeLeft / eyeTotal), center: c, radius: 36, width: 7, gap: 2.5)
+        Ink.ticks(center: c, radius: r + 5, step: 6)
 
         // Each label centered under its gauge or time; labels share one baseline.
-        // The 28 pt time is centered on the gauge's height; its column ends at the separators.
-        let label = Ink.mono(11, kern: 1)
+        // The 38 pt time is centered on the gauge's height; its column ends at the separators.
+        let label = Ink.mono(Ink.caption, kern: 1)
         let eye = NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label)
-        let x2 = right - max(Ink.width(value), Ink.width(eye)) / 2
-        Ink.draw(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: 8, anchor: 0.5)
-        Ink.draw(eye, x: x2, baseline: 8, anchor: 0.5)
-        Ink.draw(value, x: x2, baseline: c.y + r / 4 - 10, anchor: 0.5)
+        let x2 = right - Ink.columnWidth / 2
+        Ink.draw(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: 14, anchor: 0.5)
+        Ink.draw(eye, x: x2, baseline: 14, anchor: 0.5)
+        Ink.draw(value, x: x2, baseline: c.y + r / 4 - 14, anchor: 0.5)
     }
 }
 
@@ -357,6 +381,12 @@ final class MenuController: NSObject, NSMenuDelegate {
         header.view = HeaderView(clock, eyes: host.eyeBreak, inset: inset)
         menu.addItem(header)
         menu.addItem(.separator())
+        // Opening the menu saves the running focus or rest first, then draws from what is saved.
+        session.checkpoint()
+        let day = NSMenuItem()
+        day.view = DayView(FocusLog.shared.today(), inset: inset)
+        menu.addItem(day)
+        menu.addItem(.separator())
 
         switch session.phase {
         case .idle:
@@ -397,6 +427,7 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
         let it = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        it.attributedTitle = NSAttributedString(string: title, attributes: [.font: Ink.bodyFont])
         it.target = self
         return it
     }

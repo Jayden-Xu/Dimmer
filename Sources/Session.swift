@@ -20,6 +20,10 @@ final class Session {
     /// How long the last focus actually ran, and that as a share of its planned length.
     private(set) var focusedMinutes = 0.0
     private(set) var focusedFraction = 0.0
+    /// When the current stretch of running focus began; nil while paused or outside a focus.
+    private(set) var runStart: Date?
+    /// Up to where the running rest has been logged.
+    private var restMark: Date?
     private var timer: DispatchSourceTimer?
 
     var onChange: (() -> Void)?
@@ -44,7 +48,23 @@ final class Session {
         let left = pausedLeft ?? max(0, end.timeIntervalSinceNow)
         focusedMinutes = (total - left) / 60
         focusedFraction = total > 0 ? (total - left) / total : 1
+        if let runStart { FocusLog.shared.addRun(from: runStart, to: min(Date(), end)) }
+        runStart = nil
         set(.due)
+    }
+
+    /// Writes what the running focus or rest has accumulated so far to the log, so the menu's day strip and
+    /// totals are current and nothing is lost if the app quits. Called when the menu opens and on quit.
+    func checkpoint() {
+        let now = Date()
+        if phase == .focus, let runStart {
+            FocusLog.shared.addRun(from: runStart, to: min(now, end))
+            self.runStart = now
+        }
+        if phase == .rest, let restMark {
+            FocusLog.shared.addRest(from: restMark, to: min(now, end))
+            self.restMark = now
+        }
     }
 
     func togglePause() {
@@ -54,8 +74,11 @@ final class Session {
             end = Date() + left
             start = end - total
             pausedLeft = nil
+            runStart = Date()
             arm(left) { [weak self] in self?.focusRanOut() }
         } else {
+            if let runStart { FocusLog.shared.addRun(from: runStart, to: Date()) }
+            runStart = nil
             timer?.cancel()
             timer = nil
             pausedLeft = max(0, end.timeIntervalSinceNow)
@@ -72,12 +95,18 @@ final class Session {
         }
     }
 
-    func stop() { set(.idle) }
+    func stop() {
+        if phase == .rest, let restMark { FocusLog.shared.addRest(from: restMark, to: min(Date(), end)) }
+        restMark = nil
+        set(.idle)
+    }
 
     private func run(_ p: Phase, minutes: Double, then done: @escaping () -> Void) {
         let seconds = minutes * 60
         start = Date()
         end = start + seconds
+        runStart = p == .focus ? start : nil
+        restMark = p == .rest ? start : nil
         set(p)
         arm(seconds, then: done)
     }
