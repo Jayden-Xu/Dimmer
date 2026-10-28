@@ -19,8 +19,7 @@ enum Ink {
     static let unlit = NSColor.labelColor.withAlphaComponent(0.125)
     /// The last lit segment: the gauge's scan head.
     static let head = NSColor.labelColor.withAlphaComponent(0.9)
-    /// Hairlines: guides and tick scales.
-    static let hair = NSColor.labelColor.withAlphaComponent(0.14)
+    /// Tick scales.
     static let tick = NSColor.labelColor.withAlphaComponent(0.4)
     /// Separators end this far from the right edge; values and bars end there too.
     static let trailing: CGFloat = 16
