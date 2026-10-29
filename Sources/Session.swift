@@ -31,6 +31,13 @@ final class Session {
     var onChange: (() -> Void)?
     /// A focus ran out by itself (not ended by hand): its minutes.
     var onTimeUp: ((Double) -> Void)?
+    /// The last stretch of a focus (a minute, or all of a shorter one) begins: the dim starts to deepen over this long.
+    var onApproach: ((TimeInterval) -> Void)?
+    /// The approach was abandoned (paused, ended by hand, slept): the dim goes back.
+    var onApproachCancel: (() -> Void)?
+    private var approachTimer: DispatchSourceTimer?
+    private var approaching = false
+    private static let approachSeconds = 60.0
 
     var paused: Bool { pausedLeft != nil }
 
@@ -39,6 +46,7 @@ final class Session {
     }
 
     private func focusRanOut() {
+        approaching = false  // ending by itself: the end notice takes over the dim and puts it back when it is done
         endFocus()
         onTimeUp?(focusedMinutes)
     }
@@ -87,11 +95,13 @@ final class Session {
             pausedLeft = nil
             runStart = Date()
             arm(left) { [weak self] in self?.focusRanOut() }
+            armApproach(left)
         } else {
             if let runStart { FocusLog.shared.addRun(from: runStart, to: Date()) }
             runStart = nil
             timer?.cancel()
             timer = nil
+            cancelApproach()
             pausedLeft = max(0, end.timeIntervalSinceNow)
         }
         onChange?()
@@ -120,6 +130,33 @@ final class Session {
         restMark = nil
         set(p)
         arm(seconds, then: done)
+        if p == .focus { armApproach(seconds) }
+    }
+
+    /// One more one-shot, a minute before the end (at once for a focus shorter than that).
+    private func armApproach(_ left: TimeInterval) {
+        approachTimer?.cancel()
+        let ramp = min(Self.approachSeconds, left)
+        guard ramp >= 3 else { return }
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                self?.approaching = true
+                self?.onApproach?(ramp)
+            }
+        }
+        t.schedule(wallDeadline: .now() + (left - ramp), leeway: .milliseconds(200))
+        t.resume()
+        approachTimer = t
+    }
+
+    private func cancelApproach() {
+        approachTimer?.cancel()
+        approachTimer = nil
+        if approaching {
+            approaching = false
+            onApproachCancel?()
+        }
     }
 
     private func arm(_ seconds: TimeInterval, then done: @escaping () -> Void) {
@@ -131,6 +168,7 @@ final class Session {
     }
 
     private func set(_ p: Phase) {
+        cancelApproach()
         timer?.cancel()
         timer = nil
         pausedLeft = nil

@@ -6,6 +6,9 @@ final class OverlayWindow: NSWindow {
     let displayID: CGDirectDisplayID
     /// 0 = joins all Spaces (fallback mode).
     let spaceID: UInt64
+    /// An extra layer of black over the dim. Core Animation deepens it through the last minute of a focus
+    /// (no timer of ours runs); the window's own alpha stays a plain 0 / 1.
+    private let ramp = CALayer()
 
     init(frame: NSRect, displayID: CGDirectDisplayID, spaceID: UInt64, dim: Double) {
         self.displayID = displayID
@@ -32,6 +35,35 @@ final class OverlayWindow: NSWindow {
         // Window alpha stays 0/1 (visibility); the dim level lives in the background colour.
         backgroundColor = Self.color(dim)
         setFrame(frame, display: false)
+        contentView?.wantsLayer = true
+        ramp.backgroundColor = NSColor.black.cgColor
+        ramp.opacity = 0
+        ramp.frame = contentView?.bounds ?? .zero
+        ramp.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        contentView?.layer?.addSublayer(ramp)
+    }
+
+    /// Deepen the dim to `extra` (the share of the remaining light taken away) over `seconds`, evenly.
+    func startRamp(to extra: Float, over seconds: TimeInterval) {
+        let a = CABasicAnimation(keyPath: "opacity")
+        a.fromValue = ramp.presentation()?.opacity ?? 0
+        a.toValue = extra
+        a.duration = seconds
+        a.timingFunction = CAMediaTimingFunction(name: .linear)
+        ramp.opacity = extra
+        ramp.add(a, forKey: "ramp")
+    }
+
+    func resetRamp(over seconds: TimeInterval) {
+        let from = ramp.presentation()?.opacity ?? ramp.opacity
+        ramp.removeAllAnimations()
+        ramp.opacity = 0
+        guard from > 0, seconds > 0 else { return }
+        let a = CABasicAnimation(keyPath: "opacity")
+        a.fromValue = from
+        a.toValue = 0
+        a.duration = seconds
+        ramp.add(a, forKey: "reset")
     }
 
     static func color(_ dim: Double) -> NSColor { NSColor(deviceRed: 0, green: 0, blue: 0, alpha: dim) }
@@ -105,8 +137,23 @@ final class Overlays {
         active = nowActive
     }
 
+    /// The last minute of a focus: deepen the dim over `seconds`, by a third more (never past 70%).
+    func startRamp(over seconds: TimeInterval) {
+        guard dim > 0 else { return }
+        let target = min(0.7, dim + 0.33)
+        guard target > dim + 0.02 else { return }
+        let extra = Float((target - dim) / (1 - dim))
+        for w in all { w.startRamp(to: extra, over: seconds) }
+    }
+
+    /// Back to the chosen dim (the approach was abandoned, or the end-of-focus notice is over).
+    func resetRamp(over seconds: TimeInterval = 0.6) {
+        for w in all { w.resetRamp(over: seconds) }
+    }
+
     func setDim(_ dim: Double) {
         guard dim != self.dim else { return }
+        resetRamp(over: 0)
         self.dim = dim
         let color = OverlayWindow.color(dim)
         for w in all { w.backgroundColor = color }

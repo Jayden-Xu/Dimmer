@@ -26,23 +26,8 @@ final class DayView: NSView {
         let now = min(86400, Date().timeIntervalSince(today.day))
 
         // Seconds accumulated at the end of every 3 min cell, and the total.
-        func cumulative(_ spans: [FocusLog.Span]) -> (cells: [Double], total: Double) {
-            var cells = [Double](repeating: 0, count: n)
-            var total = 0.0
-            for span in spans {
-                let a = span.from.timeIntervalSince(today.day), b = span.to.timeIntervalSince(today.day)
-                total += max(0, b - a)
-                let first = max(0, Int(a / Self.cellSeconds)), last = min(n, Int(b / Self.cellSeconds) + 1)
-                guard first < last else { continue }
-                for cell in first..<last {
-                    let lo = Double(cell) * Self.cellSeconds
-                    cells[cell] += max(0, min(b, lo + Self.cellSeconds) - max(a, lo))
-                }
-            }
-            var sum = 0.0
-            return (cells.map { sum += $0; return sum }, total)
-        }
-        let focus = cumulative(today.focus), rest = cumulative(today.rest)
+        let focus = FocusLog.cumulative(today.focus, day: today.day, cells: n, cellSeconds: Self.cellSeconds)
+        let rest = FocusLog.cumulative(today.rest, day: today.day, cells: n, cellSeconds: Self.cellSeconds)
         // The top guide is the next whole hour above the larger total, at least 1 h.
         let scale = max(3600, (max(focus.total, rest.total) / 3600).rounded(.up) * 3600)
         func point(_ t: Double, _ seconds: Double) -> NSPoint {

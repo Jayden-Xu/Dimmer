@@ -26,12 +26,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
             self?.refresh()
         }
         eyeBreak = EyeBreak(minutes: settings.eyeMinutes) { [weak self] in
-            // Skip if a FOCUSED notice is up; the next one comes 20 minutes later.
+            // Skip if the end-of-focus notice is up; the next one comes 20 minutes later.
             guard let self, !endScreen.isShowing else { return }
-            endScreen.show("LOOK AWAY", value: "20", unit: "SEC", hold: 2.4)
+            endScreen.blink()
         }
+        session.onApproach = { [weak self] seconds in self?.overlays.startRamp(over: seconds) }
+        session.onApproachCancel = { [weak self] in self?.overlays.resetRamp() }
         session.onTimeUp = { [weak self] minutes in
-            self?.endScreen.show("FOCUSED", minutes: minutes)
+            guard let self else { return }
+            endScreen.focusEnded(minutes: minutes, today: FocusLog.shared.today()) { [weak self] in self?.overlays.resetRamp() }
         }
 
         // kill / pkill (and so a reinstall) end the process without applicationWillTerminate: save first.

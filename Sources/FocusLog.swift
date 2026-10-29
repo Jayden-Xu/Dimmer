@@ -44,6 +44,25 @@ final class FocusLog {
         return Today(day: day, focus: focus, rest: rest)
     }
 
+    /// Seconds accumulated by the end of each `cellSeconds` cell of `day`, and the total. The day chart in the
+    /// menu and the end-of-focus echo draw the same curves from this.
+    static func cumulative(_ spans: [Span], day: Date, cells n: Int, cellSeconds: Double) -> (cells: [Double], total: Double) {
+        var cells = [Double](repeating: 0, count: n)
+        var total = 0.0
+        for span in spans {
+            let a = span.from.timeIntervalSince(day), b = span.to.timeIntervalSince(day)
+            total += max(0, b - a)
+            let first = max(0, Int(a / cellSeconds)), last = min(n, Int(b / cellSeconds) + 1)
+            guard first < last else { continue }
+            for cell in first..<last {
+                let lo = Double(cell) * cellSeconds
+                cells[cell] += max(0, min(b, lo + cellSeconds) - max(a, lo))
+            }
+        }
+        var sum = 0.0
+        return (cells.map { sum += $0; return sum }, total)
+    }
+
     /// A checkpoint continues the span it left off: one span per stretch, however often the menu opens.
     private static func add(_ spans: inout [Span], from: Date, to: Date) {
         guard to > from else { return }
