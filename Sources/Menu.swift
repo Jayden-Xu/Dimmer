@@ -11,23 +11,22 @@ enum Ink {
     static let gaugeRadius: CGFloat = 52
     /// The header's time is centered in this width, ending at the separators.
     static let columnWidth: CGFloat = 120
-    /// The whole menu is SF Mono medium in three sizes: the header's time, everything else you read
-    /// (rows, stats, menu items), and captions (labels, axes), which are also spaced out.
+    /// The whole menu is SF Mono in three sizes: the header's time (medium), everything else you read
+    /// (rows, stats, menu items), and captions (labels, axes), which are also spaced out (regular).
     static let hero: CGFloat = 38, body: CGFloat = 14, caption: CGFloat = 11
-    static let bodyFont = NSFont.monospacedSystemFont(ofSize: body, weight: .medium)
+    static let bodyFont = NSFont.monospacedSystemFont(ofSize: body, weight: .regular)
     static let lit = NSColor.labelColor.withAlphaComponent(0.5)
     static let unlit = NSColor.labelColor.withAlphaComponent(0.125)
-    /// The last lit segment: the gauge's scan head.
-    static let head = NSColor.labelColor.withAlphaComponent(0.9)
     /// Axis ticks.
     static let tick = NSColor.labelColor.withAlphaComponent(0.4)
-    /// Focus and rest on the day strip; a rest is lighter.
-    static let focus = NSColor.labelColor.withAlphaComponent(0.6)
-    static let rest = NSColor.labelColor.withAlphaComponent(0.3)
+    /// The day strip: an empty day is very light, so a rest and a focus can be light too and still stand out.
+    static let empty = NSColor.labelColor.withAlphaComponent(0.05)
+    static let rest = NSColor.labelColor.withAlphaComponent(0.22)
+    static let focus = NSColor.labelColor.withAlphaComponent(0.5)
     /// Separators end this far from the right edge; values and bars end there too.
     static let trailing: CGFloat = 16
 
-    static func mono(_ size: CGFloat, _ weight: NSFont.Weight = .medium, kern: CGFloat = 0) -> [NSAttributedString.Key: Any] {
+    static func mono(_ size: CGFloat, _ weight: NSFont.Weight = .regular, kern: CGFloat = 0) -> [NSAttributedString.Key: Any] {
         [.font: NSFont.monospacedSystemFont(ofSize: size, weight: weight), .foregroundColor: text, .kern: kern]
     }
 
@@ -37,8 +36,9 @@ enum Ink {
         let on = on ?? Self.lit, off = off ?? Self.unlit
         let step = (rect.width + gap) / CGFloat(n)
         for i in 0..<n {
-            let left = (rect.minX + CGFloat(i) * step).rounded()
-            let right = (rect.minX + CGFloat(i + 1) * step - gap).rounded()
+            // Edges on half points (whole pixels on a retina screen) so every segment is equally crisp.
+            let left = ((rect.minX + CGFloat(i) * step) * 2).rounded() / 2
+            let right = ((rect.minX + CGFloat(i + 1) * step - gap) * 2).rounded() / 2
             (i < lit ? on : off).setFill()
             NSRect(x: left, y: rect.minY, width: right - left, height: rect.height).fill()
         }
@@ -57,7 +57,7 @@ enum Ink {
             p.appendArc(withCenter: c, radius: r, startAngle: a0, endAngle: a1, clockwise: true)
             p.appendArc(withCenter: c, radius: r - w, startAngle: a1, endAngle: a0, clockwise: false)
             p.close()
-            (i < lit ? (i == lit - 1 ? head : Self.lit) : unlit).setFill()
+            (i < lit ? Self.lit : unlit).setFill()
             p.fill()
         }
     }
@@ -135,11 +135,12 @@ final class StepBarView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private var bar: NSRect { NSRect(x: inset, y: 7, width: bounds.maxX - Ink.trailing - inset, height: 4) }
+    private var bar: NSRect { NSRect(x: inset, y: 8, width: bounds.maxX - Ink.trailing - inset, height: 3) }
 
     override func draw(_ dirtyRect: NSRect) {
         Self.drawText(label, format(steps), inset: inset, in: bounds)
-        Ink.segments(Self.count, lit: steps, in: bar)
+        // 3 thin segments per step: the bar looks finer, a step is still 5 minutes or 5%.
+        Ink.segments(Self.count * 3, lit: steps * 3, in: bar, gap: 1)
     }
 
     /// Name at the titles' inset, value at the right end, on one baseline 21 above the bottom; the bar is below it.
@@ -224,14 +225,14 @@ final class HeaderView: NSView {
     }
 
     static func clock(_ seconds: TimeInterval) -> NSAttributedString {
-        NSAttributedString(string: mmss(seconds), attributes: Ink.mono(Ink.hero, kern: 0.5))
+        NSAttributedString(string: mmss(seconds), attributes: Ink.mono(Ink.hero, .medium, kern: 0.5))
     }
 
     /// A rest's elapsed time: "12:34", or "1:05" with a small H from the first hour on.
     static func elapsed(_ seconds: TimeInterval) -> NSAttributedString {
         let s = Int(max(0, seconds))
-        guard s >= 3600 else { return NSAttributedString(string: String(format: "%02d:%02d", s / 60, s % 60), attributes: Ink.mono(Ink.hero, kern: 0.5)) }
-        let a = NSMutableAttributedString(string: String(format: "%d:%02d", s / 3600, s / 60 % 60), attributes: Ink.mono(Ink.hero, kern: 0.5))
+        guard s >= 3600 else { return NSAttributedString(string: String(format: "%02d:%02d", s / 60, s % 60), attributes: Ink.mono(Ink.hero, .medium, kern: 0.5)) }
+        let a = NSMutableAttributedString(string: String(format: "%d:%02d", s / 3600, s / 60 % 60), attributes: Ink.mono(Ink.hero, .medium, kern: 0.5))
         a.addAttribute(.kern, value: 3, range: NSRange(location: a.length - 1, length: 1))
         a.append(NSAttributedString(string: "H", attributes: Ink.mono(Ink.caption, kern: 1)))
         return a
@@ -239,7 +240,7 @@ final class HeaderView: NSView {
 
     /// "38 MIN": the unit small on the number's baseline.
     static func minutes(_ n: String) -> NSAttributedString {
-        let s = NSMutableAttributedString(string: n, attributes: Ink.mono(Ink.hero, kern: 0.5))
+        let s = NSMutableAttributedString(string: n, attributes: Ink.mono(Ink.hero, .medium, kern: 0.5))
         s.addAttribute(.kern, value: 3, range: NSRange(location: s.length - 1, length: 1))
         s.append(NSAttributedString(string: "MIN", attributes: Ink.mono(Ink.caption, kern: 1)))
         return s
