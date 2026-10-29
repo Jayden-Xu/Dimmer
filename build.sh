@@ -17,7 +17,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -swift-version 5 \
   -target "$(uname -m)-apple-macos$MIN_OS" \
   -sdk "$(xcrun --show-sdk-path)" \
-  -framework AppKit -framework Carbon -framework ServiceManagement -framework ApplicationServices -framework QuartzCore \
+  -framework AppKit -framework Carbon -framework ServiceManagement -framework ApplicationServices -framework QuartzCore -framework AVFoundation \
   Sources/*.swift -o "$APP/Contents/MacOS/$NAME"
 
 # The icon is drawn by icon.swift; regenerate only when that file changes.
