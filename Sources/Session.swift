@@ -70,6 +70,14 @@ final class Session {
         }
     }
 
+    /// The system is going to sleep or power off: the session ends here, without a notice. What the focus
+    /// or rest accumulated is logged and written, and the app is idle when the machine wakes.
+    func endSession() {
+        guard phase != .idle else { return }
+        if phase == .focus { endFocus() }
+        stop()
+    }
+
     func togglePause() {
         guard phase == .focus else { return }
         if let left = pausedLeft {

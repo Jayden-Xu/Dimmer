@@ -42,6 +42,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
         }
         termination.activate()
 
+        // Sleep or power off ends the session (a focus mustn't keep counting while the lid is shut, and a rest
+        // has no end of its own): what it accumulated is logged and written.
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.willPowerOffNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.session.endSession() }
+            }
+        }
+
         tracker.start()
         tracker.setActive(true)
         refresh()
