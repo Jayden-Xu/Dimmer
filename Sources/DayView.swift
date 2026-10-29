@@ -87,7 +87,7 @@ final class DayView: NSView {
         NSGraphicsContext.restoreGraphicsState()
         focusLine.lineWidth = 1.2
         focusLine.lineJoinStyle = .round
-        Ink.text.setStroke()
+        Ink.focus.setStroke()
         focusLine.stroke()
 
         // Time axis: a tick every hour, longer at 3 h and 6 h, labeled every 6 h.
@@ -111,7 +111,7 @@ final class DayView: NSView {
         // Time focused and rested today, each a number over its label, centered in its half; a small
         // square in the line's color marks which is which, centered with its label as one group.
         func hhmm(_ seconds: Double) -> String { String(format: "%d:%02d", Int(seconds) / 3600, Int(seconds) / 60 % 60) }
-        for (k, block) in [(hhmm(focus.total), "FOCUS", Ink.text), (hhmm(rest.total), "REST", Ink.rest)].enumerated() {
+        for (k, block) in [(hhmm(focus.total), "FOCUS", Ink.focus), (hhmm(rest.total), "REST", Ink.rest)].enumerated() {
             let cx = x0 + w * (k == 0 ? 0.25 : 0.75)
             let label = NSAttributedString(string: block.1, attributes: caption)
             Ink.draw(NSAttributedString(string: block.0, attributes: Ink.mono(Ink.body)), x: cx, baseline: h - 148, anchor: 0.5)

@@ -19,8 +19,10 @@ enum Ink {
     static let unlit = NSColor.labelColor.withAlphaComponent(0.125)
     /// Axis ticks.
     static let tick = NSColor.labelColor.withAlphaComponent(0.4)
-    /// The rest line on the day chart, lighter than the focus line.
-    static let rest = NSColor.labelColor.withAlphaComponent(0.35)
+    /// The day chart's lines use the same two tones as Pressure's lane: rest is its warning (45%), focus its
+    /// critical (80%).
+    static let rest = NSColor.labelColor.withAlphaComponent(0.45)
+    static let focus = NSColor.labelColor.withAlphaComponent(0.8)
     /// Separators end this far from the right edge; values and bars end there too.
     static let trailing: CGFloat = 16
 
