@@ -43,6 +43,28 @@ final class EndScreen {
         }
     }
 
+    /// A focus or rest begins (menu or hotkey): the header gauge's 240° arc draws itself (one piece, 0.9 s,
+    /// slow at both ends), with the word under it. Same for both.
+    func started(_ word: String, detail: String?) {
+        dismiss()
+        generation += 1
+        let shown = generation
+        for screen in NSScreen.screens {
+            let w = NoticeWindow(frame: screen.frame, veil: 0.4)
+            w.contentView?.wantsLayer = true
+            w.contentView?.layer?.addSublayer(Self.startRing(size: screen.frame.size, scale: screen.backingScaleFactor, word: word, detail: detail))
+            w.orderFrontRegardless()
+            windows.append(w)
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.25
+            for w in windows { w.animator().alphaValue = 1 }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
+            MainActor.assumeIsolated { if self?.generation == shown { self?.dismiss(fade: 0.5) } }
+        }
+    }
+
     /// The 20-20-20 reminder: a blink, 1.8 s in all.
     func blink() {
         dismiss()
@@ -177,6 +199,46 @@ final class EndScreen {
         reveal.fillMode = .backwards
         label.add(reveal, forKey: "reveal")
         layer.addSublayer(label)
+        return layer
+    }
+
+    /// The header gauge's radius and thickness at screen scale, as one unbroken arc, open at the bottom.
+    private static func startRing(size: CGSize, scale: CGFloat, word: String, detail: String?) -> CALayer {
+        let r = min(120, max(70, size.height * 0.1)), width = 12 * r / Ink.gaugeRadius
+        let c = CGPoint(x: size.width / 2, y: size.height / 2 + 16)
+        let begin = CACurrentMediaTime() + 0.25
+        let layer = CALayer()
+        layer.frame = CGRect(origin: .zero, size: size)
+        let p = NSBezierPath()
+        p.appendArc(withCenter: c, radius: r - width / 2, startAngle: 210, endAngle: -30, clockwise: true)
+        let arc = CAShapeLayer()
+        arc.path = p.cgPath
+        arc.fillColor = nil
+        arc.strokeColor = NSColor(white: 1, alpha: 0.92).cgColor
+        arc.lineWidth = width
+        arc.lineCap = .butt
+        let draw = CABasicAnimation(keyPath: "strokeEnd")
+        draw.fromValue = 0
+        draw.toValue = 1
+        draw.duration = 0.9
+        draw.beginTime = begin
+        draw.fillMode = .backwards
+        draw.timingFunction = CAMediaTimingFunction(controlPoints: 0.65, 0, 0.35, 1)
+        arc.add(draw, forKey: "draw")
+        layer.addSublayer(arc)
+        let text = CATextLayer()
+        text.string = line(detail.map { "\(word)  \($0)" } ?? word, size: 15, kern: 5)
+        text.alignmentMode = .center
+        text.frame = CGRect(x: 0, y: c.y - r - 40, width: size.width, height: 24)
+        text.contentsScale = scale
+        let reveal = CABasicAnimation(keyPath: "opacity")
+        reveal.fromValue = 0
+        reveal.toValue = 1
+        reveal.duration = 0.35
+        reveal.beginTime = begin + 0.45
+        reveal.fillMode = .backwards
+        text.add(reveal, forKey: "reveal")
+        layer.addSublayer(text)
         return layer
     }
 

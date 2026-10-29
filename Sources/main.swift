@@ -80,14 +80,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
 
     func togglePause() { session.togglePause() }
 
-    /// Hotkey and menu: idle → focus → (focus over) → rest → idle.
+    /// Hotkey and menu: focus and rest follow each other (idle → focus → rest → focus ...), each start showing its notice.
     func next() {
         switch session.phase {
-        case .idle: session.startFocus()
-        case .focus: session.endFocus()
-        case .due: session.beginRest()
-        case .rest: session.stop()
+        case .idle: beginFocus()
+        case .focus:
+            session.endFocus()
+            beginRest()
+        case .due: beginRest()
+        case .rest:
+            session.stop()
+            beginFocus()
         }
+    }
+
+    /// Menu only: back to idle, showing nothing.
+    func stop() {
+        session.endFocus()
+        session.stop()
+    }
+
+    private func beginFocus() {
+        session.startFocus()
+        endScreen.started("FOCUS", detail: EndScreen.fmt(settings.focusMinutes) + " MIN")
+    }
+
+    private func beginRest() {
+        session.beginRest()
+        endScreen.started("REST", detail: nil)
     }
 }
 

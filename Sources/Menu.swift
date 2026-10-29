@@ -289,6 +289,7 @@ protocol MenuHost: AnyObject {
     var eyeBreak: EyeBreak! { get }
     func setDimLevel(_ level: Double)
     func next()
+    func stop()
     func togglePause()
 }
 
@@ -399,7 +400,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         case .focus, .rest:
             let focus = session.phase == .focus
             if focus { menu.addItem(item(session.paused ? "Resume" : "Pause", #selector(togglePause))) }
-            menu.addItem(withHotKey(item(focus ? "End Focus" : "End Rest", #selector(next)), host.focusHotKey))
+            menu.addItem(withHotKey(item(focus ? "Start Rest" : "Start Focus", #selector(next)), host.focusHotKey))
+            menu.addItem(item("Stop", #selector(stop)))
         case .due:
             menu.addItem(withHotKey(item("Start Rest", #selector(next)), host.focusHotKey))
         }
@@ -447,6 +449,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     // MARK: actions
 
     @objc private func next() { host?.next() }
+    @objc private func stop() { host?.stop() }
     @objc private func togglePause() { host?.togglePause() }
 
     @objc private func toggleLogin() {
