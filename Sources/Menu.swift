@@ -171,46 +171,6 @@ final class StepBarView: NSView {
     }
 }
 
-/// Music on or off while a focus runs: two thick segments, the lit one is the choice. Click one, or the
-/// row to switch. Same text and baseline as the step bars.
-///
-///     Sound                  Music
-///     ▬▬▬▬▬▬▬▬▬ ▬▬▬▬▬▬▬▬▬
-final class SoundView: NSView {
-    private let inset: CGFloat
-    private let onChange: (Bool) -> Void
-    private var on: Bool { didSet { if on != oldValue { needsDisplay = true; onChange(on) } } }
-
-    init(on: Bool, inset: CGFloat, onChange: @escaping (Bool) -> Void) {
-        self.on = on
-        self.inset = inset
-        self.onChange = onChange
-        super.init(frame: NSRect(x: 0, y: 0, width: Ink.menuWidth, height: 36))
-        autoresizingMask = .width
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    private var bar: NSRect { NSRect(x: inset, y: 8, width: bounds.maxX - Ink.trailing - inset, height: 3) }
-
-    override func draw(_ dirtyRect: NSRect) {
-        StepBarView.drawText("Sound", on ? "Music" : "Off", inset: inset, in: bounds)
-        let half = (bar.width - 4) / 2
-        for i in 0..<2 {
-            let lit = (i == 1) == on
-            (lit ? Ink.lit : Ink.unlit).setFill()
-            NSRect(x: bar.minX + CGFloat(i) * (half + 4), y: bar.minY, width: half, height: bar.height).fill()
-        }
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let x = convert(event.locationInWindow, from: nil).x
-        let mid = bar.midX
-        // On the bar: the segment clicked. Elsewhere on the row: switch.
-        if event.locationInWindow.y < 20, x >= bar.minX, x <= bar.maxX { on = x > mid } else { on.toggle() }
-    }
-}
-
 /// Menu header, laid out like Pressure's: a two-ring gauge over the phase at the left edge, the time in
 /// large mono over the eye countdown at the right edge — like the rows' label left, value right.
 ///
@@ -328,7 +288,6 @@ protocol MenuHost: AnyObject {
     var focusHotKey: HotKey.Combo? { get }
     var eyeBreak: EyeBreak! { get }
     func setDimLevel(_ level: Double)
-    func setMusic(_ on: Bool)
     func next()
     func stop()
     func togglePause()
@@ -454,10 +413,6 @@ final class MenuController: NSObject, NSMenuDelegate {
         bar("Dim", steps: Int((s.dimLevel * 20).rounded()), least: 0, inset: inset, format: { "\($0 * 5)%" }) { [weak self] in
             self?.host?.setDimLevel(Double($0) / 20)
         }
-
-        let sound = NSMenuItem()
-        sound.view = SoundView(on: s.music, inset: inset) { [weak self] in self?.host?.setMusic($0) }
-        menu.addItem(sound)
 
         menu.addItem(.separator())
         let login = item("Launch at Login", #selector(toggleLogin))

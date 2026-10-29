@@ -8,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     private var menu: MenuController!
     private let hotKeys = HotKey()
     private let endScreen = EndScreen()
-    private let music = MusicPlayer()
     private(set) var eyeBreak: EyeBreak!
     let session = Session()
     private(set) var focusHotKey: HotKey.Combo?
@@ -66,7 +65,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
     private func refresh() {
         menu.setIcon(focusing: session.phase == .focus && !session.paused)
         eyeBreak.setResting(session.phase == .rest)
-        music.setPlaying(settings.music && session.phase == .focus && !session.paused)
     }
 
     // MARK: MenuHost
@@ -78,11 +76,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MenuHost {
         settings.dimLevel = level
         overlays.setDim(level)
         if wasOff && level > 0 { tracker.update() } // show the overlays again
-    }
-
-    func setMusic(_ on: Bool) {
-        settings.music = on
-        refresh()
     }
 
     func togglePause() { session.togglePause() }

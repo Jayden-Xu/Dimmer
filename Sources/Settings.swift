@@ -31,12 +31,6 @@ final class Settings {
     /// 20-20-20 reminder interval; not in the menu, only a launch argument for tests (`-eyeMinutes 0.1`).
     var eyeMinutes: Double { max(0.05, d.double(forKey: "eyeMinutes")) }
 
-    /// Music while a focus runs; off until chosen in the menu.
-    var music: Bool {
-        get { d.bool(forKey: "music") }
-        set { d.set(newValue, forKey: "music") }
-    }
-
     /// e.g. "ctrl+opt+cmd+f". Change with `defaults write com.jayden.dimmer focusHotKey "…"`, then relaunch.
     var focusHotKey: String { d.string(forKey: "focusHotKey") ?? "ctrl+opt+cmd+f" }
     var menuHotKey: String { d.string(forKey: "menuHotKey") ?? "ctrl+opt+cmd+d" }
