@@ -353,18 +353,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         return img
     }
 
-    // Items are built when the menu opens and dropped when it closes: nothing kept around while idle.
+    // Items are rebuilt from scratch every time the menu opens, and nothing runs while it is closed (the header's
+    // timers stop when its view leaves the window). They aren't cleared on close: that needed a deferred step which
+    // could run after a hotkey had already reopened the menu, and blanked it.
     func menuNeedsUpdate(_ menu: NSMenu) { rebuild() }
-    func menuDidClose(_ menu: NSMenu) {
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.menu.removeAllItems()
-                self.menu.addItem(self.placeholder())
-                trimMemory()
-            }
-        }
-    }
 
     private func placeholder() -> NSMenuItem { NSMenuItem(title: "dimmer", action: nil, keyEquivalent: "") }
 
