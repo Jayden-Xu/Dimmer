@@ -67,7 +67,7 @@ final class DayView: NSView {
         area.close()
         NSGraphicsContext.saveGraphicsState()
         area.addClip()
-        NSGradient(starting: Ink.text.withAlphaComponent(0.2), ending: Ink.text.withAlphaComponent(0.01))?
+        NSGradient(starting: Ink.text.withAlphaComponent(0.13), ending: Ink.text.withAlphaComponent(0.01))?
             .draw(from: NSPoint(x: x0, y: top), to: NSPoint(x: x0, y: bottom), options: [])
         NSGraphicsContext.restoreGraphicsState()
         focusLine.lineWidth = 1.2
