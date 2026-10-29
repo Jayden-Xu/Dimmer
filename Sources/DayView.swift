@@ -1,15 +1,14 @@
 import AppKit
 
-/// Today as a timeline strip, midnight at the left to midnight at the right, laid out exactly like
-/// Pressure's chart (same height, plot area, axis and number positions): one cell per 3 min (about a
-/// pixel), dark where focus ran and light grey where a rest ran (a cell with at least a minute of it), a
-/// small triangle where now is, an hourly time axis, and the time focused and rested under it, each a
-/// number over its label.
+/// Today as a cumulative line chart, midnight at the left to midnight at the right: the time focused so
+/// far climbs while a focus runs and stays flat otherwise, the time rested so far is a lighter line on the
+/// same axis, both stop at now. Laid out exactly like Pressure's chart (same height, plot area, axis and
+/// number positions); the time focused and rested are under it, each a number over its label.
 final class DayView: NSView {
     private let today: FocusLog.Today
     private let inset: CGFloat
     static let height: CGFloat = 172
-    private static let cells = 480, cellSeconds = 180.0, litSeconds = 60.0
+    private static let cells = 480, cellSeconds = 180.0
 
     init(_ today: FocusLog.Today, inset: CGFloat) {
         self.today = today
@@ -23,10 +22,11 @@ final class DayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let n = Self.cells, h = Self.height
         let x0 = inset, w = bounds.maxX - Ink.trailing - x0
-        let now = Date().timeIntervalSince(today.day)
+        let top = h - 24, bottom = h - 94
+        let now = min(86400, Date().timeIntervalSince(today.day))
 
-        // Seconds of focus and of rest per cell, and their totals.
-        func cover(_ spans: [FocusLog.Span]) -> (cells: [Double], total: Double) {
+        // Seconds accumulated at the end of every 3 min cell, and the total.
+        func cumulative(_ spans: [FocusLog.Span]) -> (cells: [Double], total: Double) {
             var cells = [Double](repeating: 0, count: n)
             var total = 0.0
             for span in spans {
@@ -39,33 +39,56 @@ final class DayView: NSView {
                     cells[cell] += max(0, min(b, lo + Self.cellSeconds) - max(a, lo))
                 }
             }
-            return (cells, total)
+            var sum = 0.0
+            return (cells.map { sum += $0; return sum }, total)
         }
-        let focus = cover(today.focus), rest = cover(today.rest)
+        let focus = cumulative(today.focus), rest = cumulative(today.rest)
+        // The top guide is the next whole hour above the larger total, at least 1 h.
+        let scale = max(3600, (max(focus.total, rest.total) / 3600).rounded(.up) * 3600)
+        func point(_ t: Double, _ seconds: Double) -> NSPoint {
+            NSPoint(x: x0 + w * CGFloat(t / 86400), y: bottom + CGFloat(seconds / scale) * (top - bottom))
+        }
+        // From midnight to now: the value at the end of each finished cell, then the total at now.
+        func line(_ c: (cells: [Double], total: Double)) -> NSBezierPath {
+            let p = NSBezierPath()
+            p.move(to: point(0, 0))
+            for i in 0..<n where Double(i + 1) * Self.cellSeconds <= now { p.line(to: point(Double(i + 1) * Self.cellSeconds, c.cells[i])) }
+            p.line(to: point(now, c.total))
+            return p
+        }
 
-        // The strip: the empty day, then each stretch of lit cells as one block, rests light and focus dark.
-        Ink.empty.setFill()
-        NSRect(x: x0, y: h - 94, width: w, height: 70).fill()
-        for (cells, color) in [(rest.cells, Ink.rest), (focus.cells, Ink.focus)] {
-            color.setFill()
-            var cell = 0
-            while cell < n {
-                guard cells[cell] >= Self.litSeconds else { cell += 1; continue }
-                var end = cell
-                while end < n, cells[end] >= Self.litSeconds { end += 1 }
-                NSRect(x: x0 + w * CGFloat(cell) / CGFloat(n), y: h - 94, width: w * CGFloat(end - cell) / CGFloat(n), height: 70).fill()
-                cell = end
-            }
+        // Guides: the bottom, the middle and the top (dotted).
+        for g in 0...2 {
+            let gy = bottom + CGFloat(g) * (top - bottom) / 2
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: x0, y: gy))
+            p.line(to: NSPoint(x: x0 + w, y: gy))
+            if g > 0 { p.setLineDash([1, 2], count: 2, phase: 0) }
+            p.lineWidth = 0.6
+            Ink.tick.withAlphaComponent(0.35).setStroke()
+            p.stroke()
         }
-        // Now: a triangle above the strip.
-        let nx = x0 + w * CGFloat(min(1, now / 86400))
-        let tri = NSBezierPath()
-        tri.move(to: NSPoint(x: nx - 3, y: h - 8))
-        tri.line(to: NSPoint(x: nx + 3, y: h - 8))
-        tri.line(to: NSPoint(x: nx, y: h - 15))
-        tri.close()
-        Ink.text.setFill()
-        tri.fill()
+
+        // The rest line, then the focus line with a fill that fades from the top guide to the bottom.
+        let restLine = line(rest)
+        restLine.lineWidth = 1.2
+        restLine.lineJoinStyle = .round
+        Ink.rest.setStroke()
+        restLine.stroke()
+        let focusLine = line(focus)
+        let area = focusLine.copy() as! NSBezierPath
+        area.line(to: NSPoint(x: x0 + w * CGFloat(now / 86400), y: bottom))
+        area.line(to: NSPoint(x: x0, y: bottom))
+        area.close()
+        NSGraphicsContext.saveGraphicsState()
+        area.addClip()
+        NSGradient(starting: Ink.text.withAlphaComponent(0.2), ending: Ink.text.withAlphaComponent(0.01))?
+            .draw(from: NSPoint(x: x0, y: top), to: NSPoint(x: x0, y: bottom), options: [])
+        NSGraphicsContext.restoreGraphicsState()
+        focusLine.lineWidth = 1.2
+        focusLine.lineJoinStyle = .round
+        Ink.text.setStroke()
+        focusLine.stroke()
 
         // Time axis: a tick every hour, longer at 3 h and 6 h, labeled every 6 h.
         let axisY = h - 96
@@ -86,9 +109,9 @@ final class DayView: NSView {
         }
 
         // Time focused and rested today, each a number over its label, centered in its half; a small
-        // square in the strip's color marks which is which, centered with its label as one group.
+        // square in the line's color marks which is which, centered with its label as one group.
         func hhmm(_ seconds: Double) -> String { String(format: "%d:%02d", Int(seconds) / 3600, Int(seconds) / 60 % 60) }
-        for (k, block) in [(hhmm(focus.total), "FOCUS", Ink.focus), (hhmm(rest.total), "REST", Ink.rest)].enumerated() {
+        for (k, block) in [(hhmm(focus.total), "FOCUS", Ink.text), (hhmm(rest.total), "REST", Ink.rest)].enumerated() {
             let cx = x0 + w * (k == 0 ? 0.25 : 0.75)
             let label = NSAttributedString(string: block.1, attributes: caption)
             Ink.draw(NSAttributedString(string: block.0, attributes: Ink.mono(Ink.body)), x: cx, baseline: h - 148, anchor: 0.5)

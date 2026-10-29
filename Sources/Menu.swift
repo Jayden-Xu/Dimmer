@@ -19,10 +19,8 @@ enum Ink {
     static let unlit = NSColor.labelColor.withAlphaComponent(0.125)
     /// Axis ticks.
     static let tick = NSColor.labelColor.withAlphaComponent(0.4)
-    /// The day strip: an empty day is very light, so a rest and a focus can be light too and still stand out.
-    static let empty = NSColor.labelColor.withAlphaComponent(0.05)
-    static let rest = NSColor.labelColor.withAlphaComponent(0.22)
-    static let focus = NSColor.labelColor.withAlphaComponent(0.5)
+    /// The rest line on the day chart, lighter than the focus line.
+    static let rest = NSColor.labelColor.withAlphaComponent(0.35)
     /// Separators end this far from the right edge; values and bars end there too.
     static let trailing: CGFloat = 16
 
