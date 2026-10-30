@@ -6,7 +6,8 @@ import AppKit
 final class WeekView: NSView {
     private let days: [Double?]
     private let inset: CGFloat
-    static let height: CGFloat = 92
+    /// Ink starts 10 pt from the top (the ring) and ends 10 pt from the bottom (the times), like every block.
+    static let height: CGFloat = 64
     /// Outer radius and thickness: as wide as seven columns allow, close to the header gauge's proportions.
     private static let radius: CGFloat = 17, thickness: CGFloat = 5
 
@@ -26,7 +27,7 @@ final class WeekView: NSView {
         let known = days.compactMap { $0 }
         let scale = known.max() ?? 0
         let today = days.lastIndex { $0 != nil } ?? 0
-        let r = Self.radius, col = w / 7, cy = h - 34
+        let r = Self.radius, col = w / 7, cy = h - 27
         for (i, day) in days.enumerated() {
             let cx = x0 + col * (CGFloat(i) + 0.5), now = i == today
             // Track, then the day on it; both open at the bottom like the header's gauge.
@@ -43,7 +44,7 @@ final class WeekView: NSView {
             let label = Ink.mono(Ink.caption, now ? .medium : .regular, kern: 1)
             Ink.draw(NSAttributedString(string: ["M", "T", "W", "T", "F", "S", "S"][i], attributes: label), x: cx, baseline: cy - 4, anchor: 0.5)
             if let day {
-                Ink.draw(NSAttributedString(string: Self.hhmm(day), attributes: Ink.mono(Ink.caption, now ? .medium : .regular)), x: cx, baseline: 20, anchor: 0.5)
+                Ink.draw(NSAttributedString(string: Self.hhmm(day), attributes: Ink.mono(Ink.caption, now ? .medium : .regular)), x: cx, baseline: 13, anchor: 0.5)
             }
         }
     }

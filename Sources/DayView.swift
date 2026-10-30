@@ -7,7 +7,8 @@ import AppKit
 final class DayView: NSView {
     private let today: FocusLog.Today
     private let inset: CGFloat
-    static let height: CGFloat = 172
+    /// Drawn in Pressure's 172 pt box, lifted by `lift`: ink 10 pt from the top and bottom of the view.
+    static let height: CGFloat = 164, lift: CGFloat = 6
     private static let cells = 480, cellSeconds = 180.0
 
     init(_ today: FocusLog.Today, inset: CGFloat) {
@@ -20,7 +21,13 @@ final class DayView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func draw(_ dirtyRect: NSRect) {
-        let n = Self.cells, h = Self.height
+        let n = Self.cells, h: CGFloat = 172
+        // Every block keeps its ink 10 pt from the top and bottom of its view, in both apps.
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let lift = NSAffineTransform()
+        lift.translateX(by: 0, yBy: Self.lift)
+        lift.concat()
         let x0 = inset, w = bounds.maxX - Ink.trailing - x0
         let top = h - 24, bottom = h - 94
         let now = min(86400, Date().timeIntervalSince(today.day))

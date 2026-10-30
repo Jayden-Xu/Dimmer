@@ -128,14 +128,14 @@ final class StepBarView: NSView {
         self.format = format
         self.onChange = onChange
         self.steps = min(Self.count, max(least, steps))
-        super.init(frame: NSRect(x: 0, y: 0, width: Ink.menuWidth, height: 36))
+        super.init(frame: NSRect(x: 0, y: 0, width: Ink.menuWidth, height: 43))
         // The menu widens to its widest item; stretch with it so the bar ends at the separators.
         autoresizingMask = .width
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private var bar: NSRect { NSRect(x: inset, y: 8, width: bounds.maxX - Ink.trailing - inset, height: 3) }
+    private var bar: NSRect { NSRect(x: inset, y: 10, width: bounds.maxX - Ink.trailing - inset, height: 3) }
 
     override func draw(_ dirtyRect: NSRect) {
         Self.drawText(label, format(steps), inset: inset, in: bounds)
@@ -143,9 +143,9 @@ final class StepBarView: NSView {
         Ink.segments(Self.count * 3, lit: steps * 3, in: bar, gap: 1)
     }
 
-    /// Name at the titles' inset, value at the right end, on one baseline 21 above the bottom; the bar is below it.
+    /// Name at the titles' inset, value at the right end, on one baseline 23 above the bottom; the bar is below it.
     static func drawText(_ label: String, _ value: String, inset: CGFloat, in bounds: NSRect) {
-        let y = 21 + font.descender
+        let y = 23 + font.descender
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: Ink.text]
         (label as NSString).draw(at: NSPoint(x: inset, y: y), withAttributes: attributes)
         Ink.drawRight(NSAttributedString(string: value, attributes: attributes), right: bounds.maxX - Ink.trailing, y: y)
@@ -191,7 +191,7 @@ final class HeaderView: NSView {
         case still(caption: String, value: NSAttributedString, fraction: Double)
     }
 
-    private static let height: CGFloat = 126
+    private static let height: CGFloat = 118
     private let clock: Clock
     /// Where the menu's titles start, so the columns split the same span as the rows.
     private let inset: CGFloat
@@ -274,8 +274,8 @@ final class HeaderView: NSView {
         let label = Ink.mono(Ink.caption, kern: 1)
         let eye = NSAttributedString(string: "EYE " + Self.mmss(eyeLeft), attributes: label)
         let x2 = right - Ink.columnWidth / 2
-        Ink.draw(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: 14, anchor: 0.5)
-        Ink.draw(eye, x: x2, baseline: 14, anchor: 0.5)
+        Ink.draw(NSAttributedString(string: caption, attributes: label), x: c.x, baseline: 13, anchor: 0.5)
+        Ink.draw(eye, x: x2, baseline: 13, anchor: 0.5)
         Ink.draw(value, x: x2, baseline: c.y + r / 4 - 14, anchor: 0.5)
     }
 }
