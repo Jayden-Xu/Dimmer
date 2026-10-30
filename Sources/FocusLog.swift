@@ -1,7 +1,8 @@
 import Foundation
 
 /// Today's focus and rest, for the menu's day strip: when each ran (one span per stretch without a pause
-/// for focus, one per rest). Cleared at midnight, so it never grows. Kept in memory, which is what the
+/// for focus, one per rest). Cleared at midnight, so it never grows; the focus total of each finished day of
+/// this week is kept for the menu's week rings (at most 6 numbers). Kept in memory, which is what the
 /// menu draws from, and written to UserDefaults when a focus run or a rest stops and when the app quits.
 @MainActor
 final class FocusLog {
@@ -17,12 +18,15 @@ final class FocusLog {
     private var day = Date.distantPast
     private var focus: [Span] = []
     private var rest: [Span] = []
+    /// Focus seconds of each finished day this week, by the day's start (seconds since 1970).
+    private var finished: [Double: Double] = [:]
 
     private init() {
         guard let m = defaults.dictionary(forKey: "focusLog"), let d = m["day"] as? Double else { return }
         day = Date(timeIntervalSince1970: d)
         focus = Self.spans(m["spans"] as? [Double])
         rest = Self.spans(m["rests"] as? [Double])
+        finished = (m["week"] as? [String: Double] ?? [:]).reduce(into: [:]) { if let k = Double($1.key) { $0[k] = $1.value } }
     }
 
     /// A stretch of running focus ended (paused, ended, or ran out), or is being checkpointed (`persist` false).
@@ -42,6 +46,20 @@ final class FocusLog {
     func today() -> Today {
         rollover()
         return Today(day: day, focus: focus, rest: rest)
+    }
+
+    /// Focus seconds of each day of this week, Monday first; nil for the days still to come.
+    func week() -> [Double?] {
+        rollover()
+        var cal = Calendar.current
+        cal.firstWeekday = 2
+        guard let start = cal.dateInterval(of: .weekOfYear, for: day)?.start else { return [] }
+        let total = focus.reduce(0) { $0 + max(0, $1.to.timeIntervalSince($1.from)) }
+        return (0..<7).map { k in
+            guard let d = cal.date(byAdding: .day, value: k, to: start) else { return nil }
+            if d == day { return total }
+            return d > day ? nil : finished[d.timeIntervalSince1970] ?? 0
+        }
     }
 
     /// Seconds accumulated by the end of each `cellSeconds` cell of `day`, and the total. The day chart in the
@@ -86,10 +104,18 @@ final class FocusLog {
     private func rollover() {
         let start = Calendar.current.startOfDay(for: Date())
         guard day != start else { return }
+        var cal = Calendar.current
+        cal.firstWeekday = 2
+        let weekStart = cal.dateInterval(of: .weekOfYear, for: start)?.start ?? start
+        let total = focus.reduce(0) { $0 + max(0, $1.to.timeIntervalSince($1.from)) }
+        if total > 0, day != .distantPast { finished[day.timeIntervalSince1970] = total }
+        finished = finished.filter { $0.key >= weekStart.timeIntervalSince1970 }
         (day, focus, rest) = (start, [], [])
+        save()
     }
 
     private func save() {
-        defaults.set(["day": day.timeIntervalSince1970, "spans": Self.flat(focus), "rests": Self.flat(rest)] as [String: Any], forKey: "focusLog")
+        defaults.set(["day": day.timeIntervalSince1970, "spans": Self.flat(focus), "rests": Self.flat(rest),
+                      "week": Dictionary(uniqueKeysWithValues: finished.map { (String($0.key), $0.value) })] as [String: Any], forKey: "focusLog")
     }
 }

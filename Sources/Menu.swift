@@ -393,6 +393,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         day.view = DayView(FocusLog.shared.today(), inset: inset)
         menu.addItem(day)
         menu.addItem(.separator())
+        let week = NSMenuItem()
+        week.view = WeekView(FocusLog.shared.week(), inset: inset)
+        menu.addItem(week)
+        menu.addItem(.separator())
 
         switch session.phase {
         case .idle:
