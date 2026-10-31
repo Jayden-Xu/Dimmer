@@ -1,13 +1,15 @@
 import AppKit
 
-/// Today as two lanes, midnight at the left to midnight at the right: every focus span in the top lane and
-/// every rest span below it, drawn at their real times. Laid out like Pressure's chart (same height, axis and
+/// Today as a cumulative line chart, midnight at the left to midnight at the right: the time focused so
+/// far climbs while a focus runs and stays flat otherwise, the time rested so far is a lighter line on the
+/// same axis, both stop at now. Laid out exactly like Pressure's chart (same height, plot area, axis and
 /// number positions); the time focused and rested are under it, each a number over its label.
 final class DayView: NSView {
     private let today: FocusLog.Today
     private let inset: CGFloat
     /// Drawn in Pressure's 172 pt box, lifted by `lift`: ink 10 pt from the top and bottom of the view.
     static let height: CGFloat = 164, lift: CGFloat = 6
+    private static let cells = 480, cellSeconds = 180.0
 
     init(_ today: FocusLog.Today, inset: CGFloat) {
         self.today = today
@@ -19,7 +21,7 @@ final class DayView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func draw(_ dirtyRect: NSRect) {
-        let h: CGFloat = 172
+        let n = Self.cells, h: CGFloat = 172
         // Every block keeps its ink 10 pt from the top and bottom of its view, in both apps.
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
@@ -27,27 +29,58 @@ final class DayView: NSView {
         lift.translateX(by: 0, yBy: Self.lift)
         lift.concat()
         let x0 = inset, w = bounds.maxX - Ink.trailing - x0
+        let top = h - 24, bottom = h - 94
         let now = min(86400, Date().timeIntervalSince(today.day))
-        func total(_ spans: [FocusLog.Span]) -> Double { spans.reduce(0) { $0 + max(0, $1.to.timeIntervalSince($1.from)) } }
-        let focus = (total: total(today.focus), 0), rest = (total: total(today.rest), 0)
 
-        // Two lanes, midnight at the left to midnight at the right: the spans focused (top) and rested (below),
-        // each a block from its start to its end. Same plot area as Pressure's chart.
-        let lanes: [(spans: [FocusLog.Span], y: CGFloat, color: NSColor)] = [(today.focus, h - 52, Ink.focus), (today.rest, h - 92, Ink.rest)]
-        for lane in lanes {
-            let mid = NSBezierPath()
-            mid.move(to: NSPoint(x: x0, y: lane.y + 14))
-            mid.line(to: NSPoint(x: x0 + w, y: lane.y + 14))
-            mid.lineWidth = 0.6
-            Ink.tick.withAlphaComponent(0.2).setStroke()
-            mid.stroke()
-            lane.color.setFill()
-            for span in lane.spans {
-                let a = max(0, span.from.timeIntervalSince(today.day)), b = min(max(now, a), span.to.timeIntervalSince(today.day))
-                let left = x0 + w * CGFloat(a / 86400), right = x0 + w * CGFloat(b / 86400)
-                NSRect(x: left, y: lane.y, width: max(1.5, right - left), height: 28).fill()
-            }
+        // Seconds accumulated at the end of every 3 min cell, and the total.
+        let focus = FocusLog.cumulative(today.focus, day: today.day, cells: n, cellSeconds: Self.cellSeconds)
+        let rest = FocusLog.cumulative(today.rest, day: today.day, cells: n, cellSeconds: Self.cellSeconds)
+        // The top guide is the next whole hour above the larger total, at least 1 h.
+        let scale = max(3600, (max(focus.total, rest.total) / 3600).rounded(.up) * 3600)
+        func point(_ t: Double, _ seconds: Double) -> NSPoint {
+            NSPoint(x: x0 + w * CGFloat(t / 86400), y: bottom + CGFloat(seconds / scale) * (top - bottom))
         }
+        // From midnight to now: the value at the end of each finished cell, then the total at now.
+        func line(_ c: (cells: [Double], total: Double)) -> NSBezierPath {
+            let p = NSBezierPath()
+            p.move(to: point(0, 0))
+            for i in 0..<n where Double(i + 1) * Self.cellSeconds <= now { p.line(to: point(Double(i + 1) * Self.cellSeconds, c.cells[i])) }
+            p.line(to: point(now, c.total))
+            return p
+        }
+
+        // Guides: the bottom, the middle and the top (dotted).
+        for g in 0...2 {
+            let gy = bottom + CGFloat(g) * (top - bottom) / 2
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: x0, y: gy))
+            p.line(to: NSPoint(x: x0 + w, y: gy))
+            if g > 0 { p.setLineDash([1, 2], count: 2, phase: 0) }
+            p.lineWidth = 0.6
+            Ink.tick.withAlphaComponent(0.35).setStroke()
+            p.stroke()
+        }
+
+        // The rest line, then the focus line with a fill that fades from the top guide to the bottom.
+        let restLine = line(rest)
+        restLine.lineWidth = 1.2
+        restLine.lineJoinStyle = .round
+        Ink.rest.setStroke()
+        restLine.stroke()
+        let focusLine = line(focus)
+        let area = focusLine.copy() as! NSBezierPath
+        area.line(to: NSPoint(x: x0 + w * CGFloat(now / 86400), y: bottom))
+        area.line(to: NSPoint(x: x0, y: bottom))
+        area.close()
+        NSGraphicsContext.saveGraphicsState()
+        area.addClip()
+        NSGradient(starting: Ink.text.withAlphaComponent(0.13), ending: Ink.text.withAlphaComponent(0.01))?
+            .draw(from: NSPoint(x: x0, y: top), to: NSPoint(x: x0, y: bottom), options: [])
+        NSGraphicsContext.restoreGraphicsState()
+        focusLine.lineWidth = 1.2
+        focusLine.lineJoinStyle = .round
+        Ink.focus.setStroke()
+        focusLine.stroke()
 
         // Time axis: a tick every hour, longer at 3 h and 6 h, labeled every 6 h.
         let axisY = h - 96
