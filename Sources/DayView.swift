@@ -35,8 +35,8 @@ final class DayView: NSView {
         // Seconds accumulated at the end of every 3 min cell, and the total.
         let focus = FocusLog.cumulative(today.focus, day: today.day, cells: n, cellSeconds: Self.cellSeconds)
         let rest = FocusLog.cumulative(today.rest, day: today.day, cells: n, cellSeconds: Self.cellSeconds)
-        // The top guide is the next whole hour above the larger total, at least 1 h.
-        let scale = max(3600, (max(focus.total, rest.total) / 3600).rounded(.up) * 3600)
+        // The top guide: the first step at or above the larger total (see chartTop).
+        let scale = FocusLog.chartTop(max(focus.total, rest.total))
         func point(_ t: Double, _ seconds: Double) -> NSPoint {
             NSPoint(x: x0 + w * CGFloat(t / 86400), y: bottom + CGFloat(seconds / scale) * (top - bottom))
         }
