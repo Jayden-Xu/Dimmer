@@ -2,13 +2,14 @@ import AppKit
 
 /// Today as a cumulative line chart, midnight at the left to midnight at the right: the time focused so
 /// far climbs while a focus runs and stays flat otherwise, the time rested so far is a lighter line on the
-/// same axis, both stop at now. Laid out exactly like Pressure's chart (same height, plot area, axis and
-/// number positions); the time focused and rested are under it, each a number over its label.
+/// same axis, both stop at now. Above it a lane of quarter-hour cells, focus, rest or idle, like Pressure's
+/// pressure lane. Laid out exactly like Pressure's chart (same height, lane, plot area, axis and number
+/// positions); the time focused and rested are under it, each a number over its label.
 final class DayView: NSView {
     private let today: FocusLog.Today
     private let inset: CGFloat
     /// Drawn in Pressure's 172 pt box, lifted by `lift`: ink 10 pt from the top and bottom of the view.
-    static let height: CGFloat = 164, lift: CGFloat = 6
+    static let height: CGFloat = 184, lift: CGFloat = 6
     private static let cells = 480, cellSeconds = 180.0
 
     init(_ today: FocusLog.Today, inset: CGFloat) {
@@ -81,6 +82,24 @@ final class DayView: NSView {
         focusLine.lineJoinStyle = .round
         Ink.focus.setStroke()
         focusLine.stroke()
+
+        // State lane: one cell per quarter hour from midnight to now, in the tone of what filled most of it:
+        // focus, rest, or idle. Idle is all the rest (asleep and off too), so the lane never breaks, like
+        // Pressure's. The three tones are Pressure's lane's: idle its normal, rest its warning, focus its critical.
+        func seconds(_ spans: [FocusLog.Span], _ a: Double, _ b: Double) -> Double {
+            spans.reduce(0) { $0 + max(0, min(b, $1.to.timeIntervalSince(today.day)) - max(a, $1.from.timeIntervalSince(today.day))) }
+        }
+        let quarter = 900.0
+        for g in 0..<96 {
+            let a = Double(g) * quarter
+            guard a < now else { break }
+            let b = min(a + quarter, now)
+            let focused = seconds(today.focus, a, b), rested = seconds(today.rest, a, b), idle = b - a - focused - rested
+            (focused >= rested && focused >= idle ? Ink.focus : rested >= idle ? Ink.rest : Ink.idle).setFill()
+            // Cells on the clock's quarter hours; the current one ends at now, with the lines.
+            let left = x0 + w * CGFloat(a / 86400), right = x0 + w * CGFloat(b / 86400)
+            NSRect(x: left, y: h - 12, width: max(0.5, right - left - 0.5), height: 8).fill()
+        }
 
         // Time axis: a tick every hour, longer at 3 h and 6 h, labeled every 6 h.
         let axisY = h - 96
