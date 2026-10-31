@@ -144,7 +144,7 @@ final class EndScreen {
         let now = min(86400, Date().timeIntervalSince(today.day))
         let focus = FocusLog.cumulative(today.focus, day: today.day, cells: n, cellSeconds: cellSeconds)
         let rest = FocusLog.cumulative(today.rest, day: today.day, cells: n, cellSeconds: cellSeconds)
-        let top = max(3600, (max(focus.total, rest.total) / 3600).rounded(.up) * 3600)
+        let top = FocusLog.chartTop(max(focus.total, rest.total))
         func point(_ t: Double, _ seconds: Double) -> CGPoint { CGPoint(x: w * CGFloat(t / 86400), y: labelHeight + h * CGFloat(seconds / top)) }
         func curve(_ c: (cells: [Double], total: Double)) -> CGPath {
             let p = CGMutablePath()

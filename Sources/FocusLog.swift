@@ -62,6 +62,16 @@ final class FocusLog {
         }
     }
 
+    /// The day chart's top, in seconds: the first step at or above `seconds`, from 30 min up by ×1.5 and ×2 in
+    /// turn (30 min, 45 min, 1 h, 1.5 h, 2 h, 3 h, 4 h, 6 h…), so the higher line always reaches at least 2/3
+    /// of the plot. The menu's chart and the end-of-focus echo share it, so they draw the same shape.
+    static func chartTop(_ seconds: Double) -> Double {
+        var top = 1800.0
+        while top * 1.5 < seconds { top *= 2 }
+        if top < seconds { top *= 1.5 }
+        return top
+    }
+
     /// Seconds accumulated by the end of each `cellSeconds` cell of `day`, and the total. The day chart in the
     /// menu and the end-of-focus echo draw the same curves from this.
     static func cumulative(_ spans: [Span], day: Date, cells n: Int, cellSeconds: Double) -> (cells: [Double], total: Double) {
